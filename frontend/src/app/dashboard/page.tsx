@@ -1,0 +1,228 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import Navbar from "@/components/Navbar";
+import InjuryBadge from "@/components/InjuryBadge";
+import { api } from "@/lib/api";
+import type { Matchup, Roster, StandingsEntry } from "@/lib/types";
+import { useLeague } from "@/hooks/useLeague";
+import { formatRecord } from "@/lib/utils";
+import { MessageCircle, RefreshCw } from "lucide-react";
+import { useState } from "react";
+
+const quickAsks = [
+  "Who should I start this week?",
+  "Who should I pick up off waivers?",
+  "Break down my matchup this week",
+];
+
+export default function DashboardPage() {
+  const router = useRouter();
+  const { league, leagues, selectLeague } = useLeague();
+  const [syncing, setSyncing] = useState(false);
+
+  const { data: roster } = useQuery({
+    queryKey: ["roster", league?.id],
+    queryFn: () => api<Roster>(`/api/leagues/${league!.id}/roster`),
+    enabled: !!league,
+    retry: false,
+  });
+
+  const { data: matchup } = useQuery({
+    queryKey: ["matchup", league?.id],
+    queryFn: () => api<Matchup>(`/api/leagues/${league!.id}/matchup`),
+    enabled: !!league,
+    retry: false,
+  });
+
+  const { data: standings } = useQuery({
+    queryKey: ["standings", league?.id],
+    queryFn: () => api<StandingsEntry[]>(`/api/leagues/${league!.id}/standings`),
+    enabled: !!league,
+  });
+
+  const injured =
+    roster &&
+    [...roster.starters, ...roster.bench].filter((p) => p.injury_status);
+
+  const rank =
+    standings && roster
+      ? standings.findIndex((s) => s.team_id === roster.team_id) + 1
+      : null;
+
+  async function syncNow() {
+    if (!league) return;
+    setSyncing(true);
+    try {
+      await api(`/api/leagues/${league.id}/sync`, { method: "POST" });
+      window.location.reload();
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  return (
+    <>
+      <Navbar />
+      <main className="mx-auto max-w-6xl px-4 py-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">
+              {league?.league_name ?? "Dashboard"}
+            </h1>
+            <p className="text-sm text-gray-500">
+              {league
+                ? `${league.platform} · ${league.season} · ${league.scoring_type?.replace("_", "-").toUpperCase() ?? ""}`
+                : "Loading league…"}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {leagues.length > 1 && (
+              <select
+                value={league?.id}
+                onChange={(e) => selectLeague(e.target.value)}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+              >
+                {leagues.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.league_name ?? l.league_id}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              onClick={syncNow}
+              disabled={syncing}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-100 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+              Sync
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-6 lg:grid-cols-3">
+          {/* Record card */}
+          <div className="rounded-xl border border-gray-200 bg-white p-6">
+            <h2 className="text-sm font-semibold text-gray-500">Your team</h2>
+            {roster ? (
+              <>
+                <p className="mt-2 text-3xl font-bold">
+                  {formatRecord(roster.wins, roster.losses, roster.ties)}
+                </p>
+                <p className="mt-1 text-sm text-gray-500">
+                  {rank ? `#${rank} in standings · ` : ""}
+                  {roster.points_for.toFixed(1)} PF /{" "}
+                  {roster.points_against.toFixed(1)} PA
+                </p>
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-gray-400">
+                No roster yet — try syncing.
+              </p>
+            )}
+          </div>
+
+          {/* Matchup card */}
+          <div className="rounded-xl border border-gray-200 bg-white p-6">
+            <h2 className="text-sm font-semibold text-gray-500">
+              Week {matchup?.week ?? "—"} matchup
+            </h2>
+            {matchup?.opponent_team ? (
+              <>
+                <p className="mt-2 text-lg font-bold">
+                  vs {matchup.opponent_team.owner_name ?? "Opponent"}
+                </p>
+                <p className="mt-1 text-sm text-gray-500">
+                  They&apos;re{" "}
+                  {formatRecord(
+                    matchup.opponent_team.wins,
+                    matchup.opponent_team.losses,
+                    matchup.opponent_team.ties
+                  )}{" "}
+                  with {matchup.opponent_team.points_for.toFixed(1)} PF
+                </p>
+                <Link
+                  href="/matchup"
+                  className="mt-3 inline-block text-sm font-medium text-green-700 hover:underline"
+                >
+                  Full breakdown →
+                </Link>
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-gray-400">No matchup data yet.</p>
+            )}
+          </div>
+
+          {/* Injury alerts */}
+          <div className="rounded-xl border border-gray-200 bg-white p-6">
+            <h2 className="text-sm font-semibold text-gray-500">Injury alerts</h2>
+            {injured && injured.length > 0 ? (
+              <ul className="mt-2 space-y-2">
+                {injured.slice(0, 5).map((p) => (
+                  <li key={p.id} className="flex items-center justify-between">
+                    <span className="text-sm font-medium">{p.name}</span>
+                    <InjuryBadge status={p.injury_status} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm text-gray-400">
+                No injuries on your roster. 🎉
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Quick asks */}
+        <div className="mt-8">
+          <h2 className="text-sm font-semibold text-gray-500">Ask the AI</h2>
+          <div className="mt-3 flex flex-wrap gap-3">
+            {quickAsks.map((q) => (
+              <button
+                key={q}
+                onClick={() => router.push(`/chat?q=${encodeURIComponent(q)}`)}
+                className="flex items-center gap-2 rounded-full border border-green-200 bg-green-50 px-4 py-2 text-sm font-medium text-green-800 hover:bg-green-100"
+              >
+                <MessageCircle className="h-4 w-4" />
+                {q}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Standings */}
+        {standings && standings.length > 0 && (
+          <div className="mt-8 rounded-xl border border-gray-200 bg-white">
+            <h2 className="border-b border-gray-100 px-6 py-4 text-sm font-semibold text-gray-500">
+              Standings
+            </h2>
+            <table className="w-full text-sm">
+              <tbody>
+                {standings.map((s, i) => (
+                  <tr
+                    key={s.team_id}
+                    className={`border-b border-gray-50 last:border-0 ${
+                      s.team_id === roster?.team_id ? "bg-green-50" : ""
+                    }`}
+                  >
+                    <td className="px-6 py-2.5 text-gray-400">{i + 1}</td>
+                    <td className="py-2.5 font-medium">
+                      {s.owner_name ?? `Team ${s.team_id}`}
+                    </td>
+                    <td className="py-2.5">{formatRecord(s.wins, s.losses, s.ties)}</td>
+                    <td className="px-6 py-2.5 text-right text-gray-500">
+                      {s.points_for.toFixed(1)} PF
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </main>
+    </>
+  );
+}
