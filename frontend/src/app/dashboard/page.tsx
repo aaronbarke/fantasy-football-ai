@@ -43,6 +43,15 @@ export default function DashboardPage() {
     enabled: !!league,
   });
 
+  const { data: recSummary } = useQuery({
+    queryKey: ["rec-summary", league?.id],
+    queryFn: () =>
+      api<{ wins: number; losses: number; ties: number; pending: number }>(
+        `/api/recommendations/summary?connection_id=${league!.id}`
+      ),
+    enabled: !!league,
+  });
+
   const injured =
     roster &&
     [...roster.starters, ...roster.bench].filter((p) => p.injury_status);
@@ -175,6 +184,22 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+
+        {/* AI accuracy */}
+        {recSummary && recSummary.wins + recSummary.losses + recSummary.pending > 0 && (
+          <div className="mt-6 rounded-xl border border-green-200 bg-green-50 px-6 py-4">
+            <p className="text-sm font-semibold text-green-800">
+              AI start/sit record: {recSummary.wins}-{recSummary.losses}
+              {recSummary.ties > 0 ? `-${recSummary.ties}` : ""}
+              {recSummary.pending > 0 && (
+                <span className="ml-2 font-normal text-green-700">
+                  ({recSummary.pending} call{recSummary.pending === 1 ? "" : "s"} pending
+                  this week&apos;s results)
+                </span>
+              )}
+            </p>
+          </div>
+        )}
 
         {/* Quick asks */}
         <div className="mt-8">

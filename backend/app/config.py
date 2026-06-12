@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     odds_api_key: str = ""
 
+    resend_api_key: str = ""
+    email_from: str = "Fantasy Football AI <onboarding@resend.dev>"
+
     cors_origins: str = "http://localhost:3000"
     enable_scheduler: bool = False
     current_season: int = 2026

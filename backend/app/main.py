@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import create_all
-from app.routers import auth, chat, games, leagues, players
+from app.routers import auth, chat, games, leagues, players, recommendations, trade
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +46,8 @@ app.include_router(leagues.router)
 app.include_router(players.router)
 app.include_router(chat.router)
 app.include_router(games.router)
+app.include_router(trade.router)
+app.include_router(recommendations.router)
 
 
 @app.get("/health")

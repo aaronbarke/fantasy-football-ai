@@ -55,7 +55,69 @@ async def job_refresh_player_pool() -> None:
 
 async def job_refresh_injuries() -> None:
     async with SessionLocal() as db:
-        await sync_injuries(db)
+        events = await sync_injuries(db)
+        if events:
+            await send_injury_alerts(db, events)
+
+
+async def send_injury_alerts(db, events) -> None:
+    """Email each affected user when one of their rostered players goes down."""
+    from app.models import Player, Roster, User
+    from app.services.email_service import send_email
+
+    rosters = (await db.execute(select(Roster))).scalars().all()
+    for event in events:
+        player = await db.get(Player, event.player_id)
+        if player is None:
+            continue
+        for roster in rosters:
+            if event.player_id not in (roster.players or []):
+                continue
+            conn = await db.get(LeagueConnection, roster.connection_id)
+            if conn is None or conn.team_id != roster.team_id:
+                continue  # only alert the league owner about their own roster
+            user = await db.get(User, conn.user_id)
+            if user is None:
+                continue
+
+            bench_same_pos = [
+                pid
+                for pid in (roster.players or [])
+                if pid not in (roster.starters or []) and pid != event.player_id
+            ]
+            bench_players = (
+                (await db.execute(select(Player).where(Player.id.in_(bench_same_pos))))
+                .scalars()
+                .all()
+            )
+            replacements = [
+                p.full_name for p in bench_players if p.position == player.position
+            ][:3]
+            repl_html = (
+                f"<p>Bench options at {player.position}: {', '.join(replacements)}</p>"
+                if replacements
+                else "<p>No bench players at this position — check the waiver wire.</p>"
+            )
+            await send_email(
+                to=user.email,
+                subject=f"🚑 {player.full_name} is {event.new_status}",
+                html=(
+                    f"<h2>{player.full_name} ({player.position}, {player.team}) "
+                    f"is now <b>{event.new_status}</b></h2>"
+                    f"<p>Previous status: {event.old_status or 'Healthy'}</p>"
+                    f"{repl_html}"
+                    f"<p>Open the app and ask the AI for a full replacement plan.</p>"
+                ),
+            )
+        event.notified = True
+    await db.commit()
+
+
+async def job_evaluate_recommendations() -> None:
+    from app.services.recommendation_service import evaluate_pending
+
+    async with SessionLocal() as db:
+        await evaluate_pending(db)
 
 
 async def job_refresh_odds() -> None:
@@ -138,6 +200,12 @@ def start_scheduler() -> None:
         job_refresh_weather,
         CronTrigger(day_of_week="thu,fri,sat,sun,mon", hour="6,12"),
         id="weather",
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        job_evaluate_recommendations,
+        CronTrigger(day_of_week="wed", hour=7),
+        id="rec_eval",
         misfire_grace_time=3600,
     )
     scheduler.start()

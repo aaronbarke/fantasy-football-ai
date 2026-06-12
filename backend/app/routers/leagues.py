@@ -325,6 +325,43 @@ async def get_matchup(
     )
 
 
+@router.get("/{connection_id}/schedule-strength")
+async def schedule_strength(
+    connection_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Heatmap of upcoming matchup difficulty for the user's roster."""
+    from app.services.schedule_service import build_schedule_strength
+    from app.services.sleeper_service import SleeperClient
+
+    conn = await _get_user_connection(db, user, connection_id)
+    roster = (
+        await db.execute(
+            select(Roster).where(
+                Roster.connection_id == conn.id, Roster.team_id == conn.team_id
+            )
+        )
+    ).scalar_one_or_none()
+    if roster is None or not roster.players:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No roster — sync the league first")
+
+    week = 1
+    try:
+        client = SleeperClient()
+        try:
+            state = await client.get_nfl_state()
+            week = int(state.get("week") or 1)
+        finally:
+            await client.close()
+    except Exception:
+        pass
+
+    return await build_schedule_strength(
+        db, conn.season, max(week, 1), list(roster.players)
+    )
+
+
 @router.get("/{connection_id}/waivers", response_model=list[WaiverPlayer])
 async def get_waivers(
     connection_id: str,

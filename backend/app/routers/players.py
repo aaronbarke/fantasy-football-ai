@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -64,6 +64,52 @@ async def trending_players(
                 }
             )
     return out
+
+
+@router.get("/rankings")
+async def player_rankings(
+    position: str | None = None,
+    season: int | None = None,
+    limit: int = 200,
+    _: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Players ranked by average PPR points per game — feeds the draft assistant."""
+    if season is None:
+        season = (
+            await db.execute(select(func.max(PlayerStatsWeekly.season)))
+        ).scalar_one_or_none()
+        if season is None:
+            return []
+
+    avg_col = func.avg(PlayerStatsWeekly.fantasy_points_ppr).label("avg_ppr")
+    games_col = func.count(PlayerStatsWeekly.id).label("games")
+    query = (
+        select(Player, avg_col, games_col)
+        .join(PlayerStatsWeekly, PlayerStatsWeekly.player_id == Player.id)
+        .where(PlayerStatsWeekly.season == season)
+        .group_by(Player.id)
+        .having(games_col >= 4)
+        .order_by(avg_col.desc())
+        .limit(min(limit, 400))
+    )
+    if position:
+        query = query.where(Player.position == position.upper())
+
+    rows = (await db.execute(query)).all()
+    return [
+        {
+            "id": p.id,
+            "name": p.full_name,
+            "position": p.position,
+            "team": p.team,
+            "injury_status": p.injury_status,
+            "avg_ppr": round(float(avg or 0), 1),
+            "games": int(games),
+            "season": season,
+        }
+        for p, avg, games in rows
+    ]
 
 
 @router.get("/{player_id}", response_model=PlayerOut)

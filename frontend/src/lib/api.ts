@@ -84,3 +84,50 @@ export async function api<T>(
   if (resp.status === 204) return undefined as T;
   return resp.json();
 }
+
+/** POST to an SSE endpoint and invoke onChunk for each text delta. */
+export async function apiStream(
+  path: string,
+  body: unknown,
+  onChunk: (text: string) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const token = getToken();
+  const resp = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!resp.ok || !resp.body) {
+    let detail = resp.statusText;
+    try {
+      detail = (await resp.json()).detail || detail;
+    } catch {
+      /* non-JSON */
+    }
+    throw new ApiError(resp.status, detail);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split("\n\n");
+    buffer = events.pop() ?? "";
+    for (const event of events) {
+      if (!event.startsWith("data: ")) continue;
+      const data = event.slice(6);
+      if (data === "[DONE]") return;
+      const parsed = JSON.parse(data);
+      if (parsed.error) throw new Error(parsed.error);
+      if (parsed.text) onChunk(parsed.text);
+    }
+  }
+}

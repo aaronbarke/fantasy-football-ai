@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#052e16"/>
+  <ellipse cx="256" cy="256" rx="170" ry="110" fill="#16a34a" transform="rotate(-30 256 256)"/>
+  <line x1="196" y1="290" x2="316" y2="222" stroke="#fff" stroke-width="14" stroke-linecap="round"/>
+  <line x1="222" y1="248" x2="238" y2="276" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
+  <line x1="252" y1="231" x2="268" y2="259" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
+  <line x1="282" y1="214" x2="298" y2="242" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
+  <text x="256" y="448" text-anchor="middle" font-family="Arial, sans-serif" font-size="72" font-weight="bold" fill="#fff">FFAI</text>
+</svg>

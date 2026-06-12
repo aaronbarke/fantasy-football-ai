@@ -157,6 +157,7 @@ async def player_package(
             }
 
     return {
+        "id": player.id,
         "name": player.full_name,
         "team": player.team,
         "position": player.position,
