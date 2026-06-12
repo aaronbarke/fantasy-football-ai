@@ -61,6 +61,15 @@ export default function DashboardPage() {
       ? standings.findIndex((s) => s.team_id === roster.team_id) + 1
       : null;
 
+  async function claimTeam(teamId: string) {
+    if (!league || !teamId) return;
+    await api(`/api/leagues/${league.id}/claim-team`, {
+      method: "POST",
+      body: JSON.stringify({ team_id: teamId }),
+    });
+    window.location.reload();
+  }
+
   async function syncNow() {
     if (!league) return;
     setSyncing(true);
@@ -111,6 +120,28 @@ export default function DashboardPage() {
             </button>
           </div>
         </div>
+
+        {league && !league.team_id && standings && standings.length > 0 && (
+          <div className="mt-6 rounded-xl border border-yellow-200 bg-yellow-50 px-6 py-4">
+            <p className="text-sm font-semibold text-yellow-800">
+              Which team is yours? We couldn&apos;t detect it automatically.
+            </p>
+            <select
+              defaultValue=""
+              onChange={(e) => claimTeam(e.target.value)}
+              className="mt-2 rounded-lg border border-yellow-300 bg-white px-3 py-1.5 text-sm"
+            >
+              <option value="" disabled>
+                Select your team…
+              </option>
+              {standings.map((s) => (
+                <option key={s.team_id} value={s.team_id}>
+                  {s.owner_name ?? `Team ${s.team_id}`}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="mt-6 grid gap-6 lg:grid-cols-3">
           {/* Record card */}

@@ -165,6 +165,33 @@ async def list_leagues(
     return [_conn_response(c) for c in conns]
 
 
+@router.post("/{connection_id}/claim-team", response_model=LeagueConnectionResponse)
+async def claim_team(
+    connection_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set which team in the league belongs to this user (for platforms
+    where it can't be inferred automatically, e.g. public ESPN leagues)."""
+    conn = await _get_user_connection(db, user, connection_id)
+    team_id = str(body.get("team_id", "")).strip()
+    if not team_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "team_id is required")
+    roster = (
+        await db.execute(
+            select(Roster).where(
+                Roster.connection_id == conn.id, Roster.team_id == team_id
+            )
+        )
+    ).scalar_one_or_none()
+    if roster is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such team in this league")
+    conn.team_id = team_id
+    await db.commit()
+    return _conn_response(conn)
+
+
 @router.post("/{connection_id}/sync", response_model=LeagueConnectionResponse)
 async def trigger_sync(
     connection_id: str,

@@ -195,6 +195,15 @@ async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
     conn.league_name = (data.get("settings") or {}).get("name") or conn.league_name
     espn_map = await espn_to_sleeper_map(db)
 
+    # Identify the user's team from their SWID cookie (ESPN owner GUIDs are SWIDs)
+    swid = (creds.get("swid") or "").strip().upper()
+    if not conn.team_id and swid:
+        for team in data.get("teams", []):
+            owners = [str(o).upper() for o in (team.get("owners") or [])]
+            if swid in owners:
+                conn.team_id = str(team["id"])
+                break
+
     for team in data.get("teams", []):
         team_id = str(team["id"])
         espn_ids, espn_starter_ids = ESPNClient.parse_roster_entries(team)
