@@ -20,14 +20,14 @@ export function useLeague() {
     setSelectedId(getSelectedLeague());
   }, [router]);
 
-  const { data: leagues, isLoading } = useQuery({
+  const { data: leagues, isLoading, isFetching } = useQuery({
     queryKey: ["leagues"],
     queryFn: () => api<LeagueConnection[]>("/api/leagues"),
     enabled: typeof window !== "undefined" && !!getToken(),
   });
 
   useEffect(() => {
-    if (!leagues) return;
+    if (!leagues || isFetching) return;
     if (leagues.length === 0) {
       router.push("/connect");
       return;
@@ -36,7 +36,7 @@ export function useLeague() {
       setSelectedLeague(leagues[0].id);
       setSelectedId(leagues[0].id);
     }
-  }, [leagues, selectedId, router]);
+  }, [leagues, isFetching, selectedId, router]);
 
   const league = leagues?.find((l) => l.id === selectedId) ?? leagues?.[0] ?? null;
 

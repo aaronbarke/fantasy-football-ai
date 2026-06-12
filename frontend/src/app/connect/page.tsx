@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { api, setSelectedLeague } from "@/lib/api";
 import type { LeagueConnection, SleeperLookup } from "@/lib/types";
 
 export default function ConnectPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [platform, setPlatform] = useState<"sleeper" | "espn">("sleeper");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,6 +58,7 @@ export default function ConnectPage() {
         }),
       });
       setSelectedLeague(conn.id);
+      await queryClient.invalidateQueries({ queryKey: ["leagues"] });
       router.push("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connection failed");
