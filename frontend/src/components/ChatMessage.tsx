@@ -1,6 +1,7 @@
 import type { ChatMessage as ChatMessageType } from "@/lib/types";
 import { Bot, User } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export default function ChatMessage({ message }: { message: ChatMessageType }) {
   const isUser = message.role === "user";
@@ -24,7 +25,19 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
           message.content
         ) : (
           <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
             components={{
+              table: ({ children }) => (
+                <table className="mb-2 w-full border-collapse text-xs">{children}</table>
+              ),
+              th: ({ children }) => (
+                <th className="border border-gray-200 bg-gray-50 px-2 py-1 text-left font-semibold">
+                  {children}
+                </th>
+              ),
+              td: ({ children }) => (
+                <td className="border border-gray-200 px-2 py-1">{children}</td>
+              ),
               h2: ({ children }) => <p className="mt-3 mb-1 font-bold text-base">{children}</p>,
               h3: ({ children }) => <p className="mt-2 mb-0.5 font-semibold">{children}</p>,
               p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
