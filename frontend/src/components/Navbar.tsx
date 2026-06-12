@@ -72,7 +72,7 @@ export default function Navbar() {
   const toolActive = tools.some((t) => t.href === pathname);
 
   return (
-    <nav className="border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+    <nav className="sticky top-0 z-40 border-b border-gray-200/70 bg-white/85 backdrop-blur-md dark:border-gray-800/70 dark:bg-gray-950/80">
       <div ref={wrapRef} className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
         <div className="flex items-center gap-4">
           <Link href="/dashboard" className="text-lg font-bold text-green-700 dark:text-green-400">
