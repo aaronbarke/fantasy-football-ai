@@ -16,9 +16,14 @@ from app.models import (
     GameCondition,
     LeagueConnection,
     Matchup,
+    NflSchedule,
     Player,
     PlayerStatsWeekly,
     Roster,
+)
+from app.services.schedule_service import (
+    defense_vs_position_ranks,
+    latest_stats_season,
 )
 
 INTENT_KEYWORDS = {
@@ -159,6 +164,56 @@ async def player_package(
                 },
             }
 
+    # Opponent defense vs this position: rank, points allowed, and how far
+    # above/below league average — captures tough/easy matchups (e.g. a
+    # shadow-corner defense that suppresses WR production).
+    matchup_difficulty = None
+    opponent = (conditions or {}).get("opponent")
+    if opponent is None and player.team:
+        next_game = (
+            await db.execute(
+                select(NflSchedule)
+                .where(
+                    NflSchedule.season == season,
+                    or_(
+                        NflSchedule.home_team == player.team,
+                        NflSchedule.away_team == player.team,
+                    ),
+                )
+                .order_by(NflSchedule.week.asc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if next_game:
+            opponent = (
+                next_game.away_team
+                if next_game.home_team == player.team
+                else next_game.home_team
+            )
+    if opponent and player.position in {"QB", "RB", "WR", "TE"}:
+        dvp_season = await latest_stats_season(db)
+        if dvp_season:
+            ranks = await defense_vs_position_ranks(db, dvp_season)
+            info = ranks.get((opponent, player.position))
+            if info:
+                pos_avgs = [
+                    v["pts_allowed_avg"]
+                    for (_, pos), v in ranks.items()
+                    if pos == player.position
+                ]
+                league_avg = round(sum(pos_avgs) / len(pos_avgs), 1)
+                matchup_difficulty = {
+                    "opponent": opponent,
+                    "defense_rank_vs_position": info["rank"],
+                    "rank_meaning": "1 = allows most fantasy points to this position (easiest matchup), 32 = toughest",
+                    "pts_allowed_per_game_to_position": info["pts_allowed_avg"],
+                    "league_avg_for_position": league_avg,
+                    "delta_vs_league_avg": round(
+                        info["pts_allowed_avg"] - league_avg, 1
+                    ),
+                    "based_on_season": dvp_season,
+                }
+
     return {
         "id": player.id,
         "name": player.full_name,
@@ -167,6 +222,7 @@ async def player_package(
         "injury_status": player.injury_status or "Healthy",
         "injury_body_part": player.injury_body_part,
         "stats_season": stats_season,
+        "matchup_difficulty": matchup_difficulty,
         "last_5_weeks": last_weeks,
         "averages": {
             "fantasy_points": round(sum(fps) / len(fps), 1) if fps else None,
