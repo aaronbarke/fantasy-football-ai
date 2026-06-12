@@ -21,6 +21,7 @@ const tools = [
   { href: "/schedule", label: "Schedule strength" },
   { href: "/compare", label: "Compare players" },
   { href: "/draft", label: "Draft assistant" },
+  { href: "/betting", label: "Betting edge" },
 ];
 
 export default function Navbar() {
