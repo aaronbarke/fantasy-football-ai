@@ -5,7 +5,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -227,3 +227,19 @@ async def chat_history(
         )
         for m in reversed(rows)
     ]
+
+
+@router.delete("/history", status_code=204)
+async def clear_history(
+    connection_id: str | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = delete(ChatMessage).where(ChatMessage.user_id == user.id)
+    if connection_id:
+        try:
+            stmt = stmt.where(ChatMessage.connection_id == uuid.UUID(connection_id))
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid connection id")
+    await db.execute(stmt)
+    await db.commit()

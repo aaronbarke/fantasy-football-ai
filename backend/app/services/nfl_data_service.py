@@ -1,10 +1,13 @@
-"""nflverse data pipeline via nfl_data_py.
+"""nflverse data pipeline.
 
+Reads nflverse's public parquet/CSV releases directly with pandas
+(nfl_data_py is unmaintained and won't install on Python 3.13).
 Heavy pandas imports are kept lazy so the API server starts fast and tests
 don't need the dependency installed. The Tuesday stat-refresh job is the main
 consumer here.
 """
 
+import io
 import logging
 import math
 from typing import Any
@@ -53,18 +56,46 @@ def _clean(value: Any) -> Any:
     return value
 
 
+NFLVERSE_STATS_URLS = [
+    "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_{season}.parquet",
+    "https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats_{season}.parquet",
+]
+IDS_URL = "https://github.com/dynastyprocess/data/raw/master/files/db_playerids.csv"
+
+
+def _download(url: str) -> io.BytesIO:
+    """Fetch with httpx (bundled CA certs) — urllib fails on stock macOS Python."""
+    import httpx
+
+    resp = httpx.get(url, follow_redirects=True, timeout=120)
+    resp.raise_for_status()
+    return io.BytesIO(resp.content)
+
+
 def fetch_weekly_dataframe(seasons: list[int]):
     """Blocking pandas call — run in a thread from async contexts."""
-    import nfl_data_py as nfl
+    import pandas as pd
 
-    return nfl.import_weekly_data(seasons)
+    frames = []
+    for season in seasons:
+        last_err: Exception | None = None
+        for url_tpl in NFLVERSE_STATS_URLS:
+            try:
+                frames.append(pd.read_parquet(_download(url_tpl.format(season=season))))
+                last_err = None
+                break
+            except Exception as exc:  # noqa: BLE001 — try next URL naming scheme
+                last_err = exc
+        if last_err is not None:
+            raise last_err
+    return pd.concat(frames, ignore_index=True)
 
 
 def fetch_id_crosswalk():
-    """nflverse ID mapping table: gsis_id ↔ sleeper_id ↔ espn_id ↔ yahoo_id."""
-    import nfl_data_py as nfl
+    """ID mapping table: gsis_id ↔ sleeper_id ↔ espn_id ↔ yahoo_id."""
+    import pandas as pd
 
-    return nfl.import_ids()
+    return pd.read_csv(_download(IDS_URL), dtype=str)
 
 
 async def sync_id_crosswalk(db: AsyncSession) -> int:
@@ -126,7 +157,13 @@ async def sync_weekly_stats(db: AsyncSession, seasons: list[int]) -> int:
         values = {
             "pass_yards": _clean(getattr(row, "passing_yards", 0)) or 0,
             "pass_tds": int(_clean(getattr(row, "passing_tds", 0)) or 0),
-            "interceptions": int(_clean(getattr(row, "interceptions", 0)) or 0),
+            "interceptions": int(
+                _clean(
+                    getattr(row, "passing_interceptions", None)
+                    or getattr(row, "interceptions", 0)
+                )
+                or 0
+            ),
             "rush_attempts": int(_clean(getattr(row, "carries", 0)) or 0),
             "rush_yards": _clean(getattr(row, "rushing_yards", 0)) or 0,
             "rush_tds": int(_clean(getattr(row, "rushing_tds", 0)) or 0),

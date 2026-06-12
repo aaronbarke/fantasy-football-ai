@@ -55,7 +55,7 @@ class ESPNClient:
         return await self._get(["mTeam"])
 
     async def get_rosters(self) -> dict:
-        return await self._get(["mRoster", "mTeam"])
+        return await self._get(["mRoster", "mTeam", "mSettings"])
 
     async def get_matchups(self) -> dict:
         return await self._get(["mMatchup"])
