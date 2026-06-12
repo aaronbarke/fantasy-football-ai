@@ -138,6 +138,29 @@ function ChatInner() {
           )}
           <div ref={bottomRef} />
         </div>
+        {messages.length > 0 && !busy && (
+          <div className="flex flex-wrap items-center gap-2 pb-2">
+            {starters.slice(0, 3).map((s) => (
+              <button
+                key={s}
+                onClick={() => send(s)}
+                className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-600 hover:border-green-400 hover:bg-green-50"
+              >
+                {s}
+              </button>
+            ))}
+            <button
+              onClick={async () => {
+                if (!league || !window.confirm("Clear this league's chat history?")) return;
+                await api(`/api/chat/history?connection_id=${league.id}`, { method: "DELETE" });
+                setMessages([]);
+              }}
+              className="ml-auto rounded-full px-3 py-1 text-xs text-gray-400 hover:text-red-500"
+            >
+              Clear chat
+            </button>
+          </div>
+        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();

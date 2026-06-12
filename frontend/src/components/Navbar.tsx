@@ -185,6 +185,7 @@ export default function Navbar() {
           </button>
           <button
             onClick={() => {
+              if (!window.confirm("Sign out of FFAI?")) return;
               clearTokens();
               router.push("/login");
             }}
