@@ -75,7 +75,8 @@ export default function ComparePage() {
     if (range === "season") {
       // Full most-recent season for this player, from week 1
       const latest = sorted.length ? sorted[sorted.length - 1].season : null;
-      stats = sorted.filter((s) => s.season === latest);
+      // Regular season only — weeks 19+ are playoffs
+      stats = sorted.filter((s) => s.season === latest && s.week <= 18);
     } else {
       stats = sorted.slice(range === "last10" ? -10 : -5);
     }
