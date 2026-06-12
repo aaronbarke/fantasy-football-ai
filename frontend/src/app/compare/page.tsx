@@ -248,6 +248,12 @@ export default function ComparePage() {
             </ResponsiveContainer>
           )}
         </div>
+        {players.length > 0 && (
+          <p className="mt-2 text-center text-xs text-gray-400">
+            Breaks in a player&apos;s line indicate a bye week or games missed
+            due to injury.
+          </p>
+        )}
       </main>
     </>
   );
