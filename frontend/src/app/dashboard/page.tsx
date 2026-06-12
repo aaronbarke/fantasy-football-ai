@@ -168,7 +168,7 @@ export default function DashboardPage() {
           {/* Matchup card */}
           <div className="rounded-xl border border-gray-200 bg-white p-6">
             <h2 className="text-sm font-semibold text-gray-500">
-              Week {matchup?.week ?? "—"} matchup
+              {matchup?.week ? `Week ${matchup.week} matchup` : "Matchup"}
             </h2>
             {matchup?.opponent_team ? (
               <>

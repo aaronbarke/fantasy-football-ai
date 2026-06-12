@@ -27,7 +27,7 @@ export default function MatchupPage() {
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">
-            Week {matchup?.week ?? "—"} matchup
+            {matchup?.week ? `Week ${matchup.week} matchup` : "Matchup"}
           </h1>
           <Link
             href={`/chat?q=${encodeURIComponent("Break down my matchup this week")}`}
@@ -40,7 +40,8 @@ export default function MatchupPage() {
         {isLoading && <p className="mt-4 text-sm text-gray-400">Loading…</p>}
         {!isLoading && !matchup?.opponent_team && (
           <p className="mt-4 text-sm text-gray-400">
-            No matchup data — sync your league from the dashboard.
+            No matchup data yet — schedules appear once your league&apos;s
+            season starts. Try Sync after draft day.
           </p>
         )}
 

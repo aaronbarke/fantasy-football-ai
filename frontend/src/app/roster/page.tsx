@@ -39,7 +39,16 @@ export default function RosterPage() {
           </p>
         )}
 
-        {roster && (
+        {roster &&
+          roster.starters.length === 0 &&
+          roster.bench.length === 0 && (
+            <p className="mt-4 text-sm text-gray-400">
+              Your roster is empty — your league hasn&apos;t drafted yet. Check
+              back after draft day and hit Sync.
+            </p>
+          )}
+
+        {roster && (roster.starters.length > 0 || roster.bench.length > 0) && (
           <div className="mt-6 grid gap-8 lg:grid-cols-2">
             <section>
               <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
