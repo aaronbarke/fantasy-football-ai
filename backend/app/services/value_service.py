@@ -1,8 +1,11 @@
 """Player trade-value model.
 
 Assigns every player a 0-100 value from their recency-weighted PPR points
-per game, ranked as a percentile within their position. Recomputed from the
-stats table on demand, so values drift week to week as performances change.
+per game, ranked as a percentile within their position. The latest two
+seasons are blended (latest counts ~2x) so an established star coming off a
+down or injury-shortened year keeps most of their tier — one bad season
+shouldn't rate Lamar Jackson like a mid QB2. Recomputed from the stats table
+on demand, so values drift week to week as performances change.
 """
 
 from collections import defaultdict
@@ -17,6 +20,7 @@ from app.models import Player, PlayerStatsWeekly
 RECENT_WINDOW = 4
 MIN_GAMES = 2
 VALUED_POSITIONS = {"QB", "RB", "WR", "TE"}
+PRIOR_SEASON_WEIGHT = 0.5  # latest season counts double vs the one before
 
 
 async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
@@ -31,13 +35,14 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
         await db.execute(
             select(
                 PlayerStatsWeekly.player_id,
+                PlayerStatsWeekly.season,
                 PlayerStatsWeekly.week,
                 PlayerStatsWeekly.fantasy_points_ppr,
                 Player.position,
             )
             .join(Player, Player.id == PlayerStatsWeekly.player_id)
             .where(
-                PlayerStatsWeekly.season == latest_season,
+                PlayerStatsWeekly.season >= latest_season - 1,
                 PlayerStatsWeekly.fantasy_points_ppr.is_not(None),
             )
         )
@@ -45,7 +50,7 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
     if not rows:
         return {}
 
-    latest_week = max(r.week for r in rows)
+    latest_week = max(r.week for r in rows if r.season == latest_season)
     recent_cutoff = latest_week - RECENT_WINDOW
 
     weighted: dict[str, dict] = {}
@@ -53,7 +58,10 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
         entry = weighted.setdefault(
             r.player_id, {"pts": 0.0, "wt": 0.0, "games": 0, "position": r.position}
         )
-        w = 2.0 if r.week >= recent_cutoff else 1.0
+        if r.season == latest_season:
+            w = 2.0 if r.week >= recent_cutoff else 1.0
+        else:
+            w = PRIOR_SEASON_WEIGHT
         entry["pts"] += float(r.fantasy_points_ppr) * w
         entry["wt"] += w
         entry["games"] += 1
