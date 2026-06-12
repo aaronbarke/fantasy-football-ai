@@ -93,6 +93,15 @@ export default function ComparePage() {
       ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10
       : null;
   });
+  // Full-season view: show every week 1-18 so byes and missed games appear
+  // as gaps in the line instead of being silently skipped.
+  if (range === "season" && Object.keys(merged).length > 0) {
+    const season = Object.keys(merged).sort().slice(-1)[0].split("W")[0];
+    for (let w = 1; w <= 18; w++) {
+      const key = `${season}W${String(w).padStart(2, "0")}`;
+      merged[key] ??= { label: `W${w}` };
+    }
+  }
   const chartData = Object.entries(merged)
     .sort(([a], [b]) => (a < b ? -1 : 1))
     .map(([, v]) => v);
@@ -232,7 +241,7 @@ export default function ComparePage() {
                     stroke={COLORS[i]}
                     strokeWidth={2}
                     dot={{ r: 3 }}
-                    connectNulls
+                    connectNulls={false}
                   />
                 ))}
               </LineChart>
