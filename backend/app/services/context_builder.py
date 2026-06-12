@@ -81,17 +81,20 @@ async def player_package(
     db: AsyncSession, player: Player, season: int, scoring_type: str
 ) -> dict[str, Any]:
     """Stats + matchup + game conditions for one player."""
+    # Use the most recent stats available — pre-season the league year has no
+    # data yet, so fall back to the prior season rather than returning nothing.
     stats = (
         await db.execute(
             select(PlayerStatsWeekly)
             .where(
                 PlayerStatsWeekly.player_id == player.id,
-                PlayerStatsWeekly.season == season,
+                PlayerStatsWeekly.season <= season,
             )
-            .order_by(PlayerStatsWeekly.week.desc())
+            .order_by(PlayerStatsWeekly.season.desc(), PlayerStatsWeekly.week.desc())
             .limit(5)
         )
     ).scalars().all()
+    stats_season = stats[0].season if stats else None
 
     fp_field = {
         "ppr": "fantasy_points_ppr",
@@ -163,6 +166,7 @@ async def player_package(
         "position": player.position,
         "injury_status": player.injury_status or "Healthy",
         "injury_body_part": player.injury_body_part,
+        "stats_season": stats_season,
         "last_5_weeks": last_weeks,
         "averages": {
             "fantasy_points": round(sum(fps) / len(fps), 1) if fps else None,
