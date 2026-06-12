@@ -34,6 +34,7 @@ export default function ComparePage() {
   const [metric, setMetric] = useState<(typeof METRICS)[number]["key"]>(
     "fantasy_points_ppr"
   );
+  const [range, setRange] = useState<"season" | "last10" | "last5">("season");
 
   async function search(value: string) {
     setQ(value);
@@ -63,13 +64,20 @@ export default function ComparePage() {
     })),
   });
 
-  // Merge each player's last 10 weeks into one chart dataset keyed by season-week
+  // Merge each player's selected window into one chart dataset keyed by season-week
   const merged: Record<string, Record<string, number | string>> = {};
   statQueries.forEach((sq, idx) => {
-    const stats = (sq.data ?? [])
+    const sorted = (sq.data ?? [])
       .slice()
-      .sort((a, b) => a.season - b.season || a.week - b.week)
-      .slice(-10);
+      .sort((a, b) => a.season - b.season || a.week - b.week);
+    let stats = sorted;
+    if (range === "season") {
+      // Full most-recent season for this player, from week 1
+      const latest = sorted.length ? sorted[sorted.length - 1].season : null;
+      stats = sorted.filter((s) => s.season === latest);
+    } else {
+      stats = sorted.slice(range === "last10" ? -10 : -5);
+    }
     for (const s of stats) {
       // Zero-pad the week so string sorting matches chronological order
       const key = `${s.season}W${String(s.week).padStart(2, "0")}`;
@@ -151,7 +159,27 @@ export default function ComparePage() {
           )}
         </div>
 
-        <div className="mt-4 flex gap-1.5">
+        <div className="mt-4 flex flex-wrap items-center gap-1.5">
+          {(
+            [
+              { key: "season", label: "Full season" },
+              { key: "last10", label: "Last 10" },
+              { key: "last5", label: "Last 5" },
+            ] as const
+          ).map((r) => (
+            <button
+              key={r.key}
+              onClick={() => setRange(r.key)}
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                range === r.key
+                  ? "bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+          <span className="mx-1 h-4 w-px bg-gray-300" />
           {METRICS.map((m) => (
             <button
               key={m.key}
