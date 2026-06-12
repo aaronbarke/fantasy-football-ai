@@ -71,7 +71,8 @@ export default function ComparePage() {
       .sort((a, b) => a.season - b.season || a.week - b.week)
       .slice(-10);
     for (const s of stats) {
-      const key = `${s.season}W${s.week}`;
+      // Zero-pad the week so string sorting matches chronological order
+      const key = `${s.season}W${String(s.week).padStart(2, "0")}`;
       merged[key] ??= { label: `W${s.week}` };
       merged[key][players[idx].name] = Number(
         (s as unknown as Record<string, number | null>)[metric] ?? 0
