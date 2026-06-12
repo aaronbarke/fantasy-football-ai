@@ -126,11 +126,27 @@ function TradeSide({
   );
 }
 
+interface TradePlayerValue {
+  id: string;
+  name: string;
+  value: number;
+  ppg: number | null;
+}
+
+interface TradeResult {
+  analysis: string;
+  give_value: number;
+  receive_value: number;
+  verdict: string;
+  player_values: TradePlayerValue[];
+  sweeteners: TradePlayerValue[];
+}
+
 export default function TradePage() {
   const { league } = useLeague();
   const [give, setGive] = useState<PlayerCard[]>([]);
   const [receive, setReceive] = useState<PlayerCard[]>([]);
-  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [result, setResult] = useState<TradeResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -140,9 +156,9 @@ export default function TradePage() {
     if (!league || give.length === 0 || receive.length === 0) return;
     setBusy(true);
     setError(null);
-    setAnalysis(null);
+    setResult(null);
     try {
-      const resp = await api<{ analysis: string }>("/api/trade/analyze", {
+      const resp = await api<TradeResult>("/api/trade/analyze", {
         method: "POST",
         body: JSON.stringify({
           connection_id: league.id,
@@ -150,7 +166,7 @@ export default function TradePage() {
           receive: receive.map((p) => p.id),
         }),
       });
-      setAnalysis(resp.analysis);
+      setResult(resp);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analysis failed");
     } finally {
@@ -190,9 +206,72 @@ export default function TradePage() {
 
         {error && <p className="mt-4 text-center text-sm text-red-600">{error}</p>}
 
-        {analysis && (
-          <div className="prose-sm mt-8 rounded-xl border border-gray-200 bg-white p-6 text-sm leading-relaxed">
-            <ReactMarkdown>{analysis}</ReactMarkdown>
+        {result && (
+          <div className="mt-8 space-y-4">
+            {/* Trade score */}
+            <div className="rounded-xl border border-gray-200 bg-white p-6">
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-center">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">You give</p>
+                  <p className="text-3xl font-bold">{result.give_value}</p>
+                </div>
+                <div className="flex-1 text-center">
+                  <p
+                    className={`text-lg font-bold ${
+                      result.receive_value - result.give_value >= 8
+                        ? "text-green-600"
+                        : result.give_value - result.receive_value >= 8
+                          ? "text-red-600"
+                          : "text-gray-700"
+                    }`}
+                  >
+                    {result.verdict}
+                  </p>
+                  <div className="mx-auto mt-2 flex h-2 max-w-xs overflow-hidden rounded-full bg-gray-100">
+                    <div
+                      className="bg-red-400"
+                      style={{
+                        width: `${(result.give_value / Math.max(result.give_value + result.receive_value, 1)) * 100}%`,
+                      }}
+                    />
+                    <div className="flex-1 bg-green-500" />
+                  </div>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">You receive</p>
+                  <p className="text-3xl font-bold">{result.receive_value}</p>
+                </div>
+              </div>
+
+              {/* Per-player values */}
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {result.player_values.map((p) => (
+                  <span
+                    key={p.id}
+                    className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs"
+                  >
+                    {p.name}: <strong>{p.value}</strong>
+                    {p.ppg != null && <span className="text-gray-400"> · {p.ppg} ppg</span>}
+                  </span>
+                ))}
+              </div>
+
+              {result.sweeteners.length > 0 && (
+                <p className="mt-4 text-center text-xs text-gray-500">
+                  To even it out, consider adding from your roster:{" "}
+                  {result.sweeteners.map((s, i) => (
+                    <span key={s.id}>
+                      {i > 0 && ", "}
+                      <strong>{s.name}</strong> ({s.value})
+                    </span>
+                  ))}
+                </p>
+              )}
+            </div>
+
+            <div className="prose-sm rounded-xl border border-gray-200 bg-white p-6 text-sm leading-relaxed">
+              <ReactMarkdown>{result.analysis}</ReactMarkdown>
+            </div>
           </div>
         )}
       </main>
