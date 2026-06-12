@@ -232,6 +232,22 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* Game plan promo */}
+        <Link
+          href="/gameplan"
+          className="mt-6 flex items-center justify-between rounded-xl border border-green-300 bg-gradient-to-r from-green-600 to-green-700 px-6 py-5 text-white shadow-md transition-transform hover:scale-[1.01]"
+        >
+          <div>
+            <p className="text-lg font-bold">This week&apos;s game plan →</p>
+            <p className="mt-0.5 text-sm text-green-100">
+              Optimal lineup, projected score, and win odds — built by the model.
+            </p>
+          </div>
+          <span className="hidden rounded-full bg-white/15 px-3 py-1 text-xs font-semibold sm:block">
+            NEW
+          </span>
+        </Link>
+
         {/* Quick asks */}
         <div className="mt-8">
           <h2 className="text-sm font-semibold text-gray-500">Ask the AI</h2>

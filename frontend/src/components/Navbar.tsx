@@ -10,6 +10,7 @@ import { ChevronDown, LogOut, Moon, Plus, Sun, Wrench } from "lucide-react";
 
 const links = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/gameplan", label: "Game plan" },
   { href: "/chat", label: "Chat" },
   { href: "/roster", label: "Roster" },
   { href: "/matchup", label: "Matchup" },
