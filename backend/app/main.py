@@ -10,6 +10,7 @@ from app.routers import (
     auth,
     betting,
     chat,
+    gameplan,
     games,
     leagues,
     players,
@@ -58,6 +59,7 @@ app.include_router(games.router)
 app.include_router(trade.router)
 app.include_router(recommendations.router)
 app.include_router(betting.router)
+app.include_router(gameplan.router)
 
 
 @app.get("/health")

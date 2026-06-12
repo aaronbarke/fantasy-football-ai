@@ -19,10 +19,19 @@ TRADE_QUESTION = (
     "RECEIVES the players in trade.receive. Each player has a trade_value "
     "(0-100, percentile of recency-weighted PPR production at their position) "
     "and the totals for each side are in trade.value_summary — anchor your "
-    "verdict in those numbers plus the weekly stats. Grade each side A-F, "
-    "explain who wins and why, and call out any positional depth problems this "
-    "trade creates for the user's roster. End with a clear accept/reject/counter "
-    "recommendation."
+    "verdict in those numbers plus the weekly stats.\n\n"
+    "Grading rubric (apply strictly):\n"
+    "- Value gap under 8 points: even trade — grade both sides in the same "
+    "letter band; the verdict hinges on roster fit, not raw value.\n"
+    "- Gap 8-19: meaningful edge. Winner gets a full letter grade above loser.\n"
+    "- Gap 20+: lopsided. The losing side cannot grade above C, and you should "
+    "propose a specific counter using trade.sweetener_candidates if provided.\n"
+    "- Positional scarcity matters: an elite RB/TE is worth more than equal "
+    "value at WR. Consuming a roster's last startable depth at a position "
+    "drops that side half a grade.\n\n"
+    "Structure: bold one-line verdict first, then a Side Grades section, then "
+    "roster-fit analysis, then a clear ACCEPT / REJECT / COUNTER call with "
+    "confidence. If countering, name the exact players to add."
 )
 
 # Value gap below which a trade is considered roughly fair

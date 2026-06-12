@@ -2,9 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_db
 from app.models import Player, PlayerStatsWeekly, User
 from app.schemas.player import PlayerOut, WeeklyStatOut
+from app.services.projection_service import compute_projections
 from app.services.sleeper_service import SleeperClient
 from app.utils.security import get_current_user
 
@@ -97,6 +99,9 @@ async def player_rankings(
         query = query.where(Player.position == position.upper())
 
     rows = (await db.execute(query)).all()
+    projections = await compute_projections(
+        db, [p.id for p, _, _ in rows], get_settings().current_season
+    )
     return [
         {
             "id": p.id,
@@ -107,6 +112,8 @@ async def player_rankings(
             "avg_ppr": round(float(avg or 0), 1),
             "games": int(games),
             "season": season,
+            "projected": (projections.get(p.id) or {}).get("projected"),
+            "proj_confidence": (projections.get(p.id) or {}).get("confidence"),
         }
         for p, avg, games in rows
     ]
