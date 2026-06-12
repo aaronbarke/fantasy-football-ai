@@ -66,6 +66,7 @@ export default function ComparePage() {
 
   // Merge each player's selected window into one chart dataset keyed by season-week
   const merged: Record<string, Record<string, number | string>> = {};
+  const averages: (number | null)[] = [];
   statQueries.forEach((sq, idx) => {
     const sorted = (sq.data ?? [])
       .slice()
@@ -78,14 +79,18 @@ export default function ComparePage() {
     } else {
       stats = sorted.slice(range === "last10" ? -10 : -5);
     }
+    const values: number[] = [];
     for (const s of stats) {
       // Zero-pad the week so string sorting matches chronological order
       const key = `${s.season}W${String(s.week).padStart(2, "0")}`;
       merged[key] ??= { label: `W${s.week}` };
-      merged[key][players[idx].name] = Number(
-        (s as unknown as Record<string, number | null>)[metric] ?? 0
-      );
+      const v = Number((s as unknown as Record<string, number | null>)[metric] ?? 0);
+      merged[key][players[idx].name] = v;
+      values.push(v);
     }
+    averages[idx] = values.length
+      ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10
+      : null;
   });
   const chartData = Object.entries(merged)
     .sort(([a], [b]) => (a < b ? -1 : 1))
@@ -196,6 +201,17 @@ export default function ComparePage() {
         </div>
 
         <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4">
+          {players.length > 0 && (
+            <div className="mb-2 flex flex-wrap justify-end gap-3 text-sm font-semibold">
+              {players.map((p, i) =>
+                averages[i] != null ? (
+                  <span key={p.id} style={{ color: COLORS[i] }}>
+                    {p.name.split(" ").slice(-1)[0]} avg: {averages[i]}
+                  </span>
+                ) : null
+              )}
+            </div>
+          )}
           {players.length === 0 ? (
             <p className="py-16 text-center text-sm text-gray-400">
               Add players above to start comparing.
