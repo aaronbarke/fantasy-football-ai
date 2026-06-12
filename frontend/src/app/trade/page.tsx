@@ -8,6 +8,7 @@ import { useLeague } from "@/hooks/useLeague";
 import { positionColor } from "@/lib/utils";
 import { ArrowLeftRight, Search, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 function PlayerSearchAdd({
   onAdd,
@@ -270,7 +271,24 @@ export default function TradePage() {
             </div>
 
             <div className="prose-sm rounded-xl border border-gray-200 bg-white p-6 text-sm leading-relaxed">
-              <ReactMarkdown>{result.analysis}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  table: ({ children }) => (
+                    <table className="mb-3 w-full border-collapse text-xs">{children}</table>
+                  ),
+                  th: ({ children }) => (
+                    <th className="border border-gray-200 bg-gray-50 px-2 py-1 text-left font-semibold">
+                      {children}
+                    </th>
+                  ),
+                  td: ({ children }) => (
+                    <td className="border border-gray-200 px-2 py-1">{children}</td>
+                  ),
+                }}
+              >
+                {result.analysis}
+              </ReactMarkdown>
             </div>
           </div>
         )}

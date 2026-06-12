@@ -8,6 +8,7 @@ import { useLeague } from "@/hooks/useLeague";
 import { positionColor } from "@/lib/utils";
 import { RotateCcw, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface RankedPlayer {
   id: string;
@@ -221,7 +222,7 @@ export default function DraftPage() {
 
             {advice && (
               <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm leading-relaxed">
-                <ReactMarkdown>{advice}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{advice}</ReactMarkdown>
               </div>
             )}
           </div>
