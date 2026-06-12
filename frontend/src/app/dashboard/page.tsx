@@ -23,7 +23,7 @@ export default function DashboardPage() {
   const { league, leagues, selectLeague } = useLeague();
   const [syncing, setSyncing] = useState(false);
 
-  const { data: roster } = useQuery({
+  const { data: roster, isLoading: rosterLoading } = useQuery({
     queryKey: ["roster", league?.id],
     queryFn: () => api<Roster>(`/api/leagues/${league!.id}/roster`),
     enabled: !!league,
@@ -147,7 +147,12 @@ export default function DashboardPage() {
           {/* Record card */}
           <div className="rounded-xl border border-gray-200 bg-white p-6">
             <h2 className="text-sm font-semibold text-gray-500">Your team</h2>
-            {roster ? (
+            {rosterLoading ? (
+              <div className="mt-3 space-y-2">
+                <div className="skeleton h-8 w-24" />
+                <div className="skeleton h-4 w-40" />
+              </div>
+            ) : roster ? (
               <>
                 <p className="mt-2 text-3xl font-bold">
                   {formatRecord(roster.wins, roster.losses, roster.ties)}

@@ -9,6 +9,26 @@ context to give grounded, data-backed advice.
 > "An AI assistant that knows your fantasy league as well as you do, and never
 > forgets to check the injury report."
 
+## Feature highlights
+
+- **Weekly Game Plan** — one click builds the projection-optimal lineup,
+  flags start/sit swaps vs your current starters, projects your score, and
+  computes win probability against this week's opponent — then an AI coach's
+  brief explains every call.
+- **Projection engine** — per-player weekly projections with floor/ceiling
+  bands: two seasons of recency-weighted production, defense-vs-position
+  matchup adjustment, and Vegas implied-total adjustment.
+- **AI chat with receipts** — streaming answers grounded in your roster,
+  live stats, matchup difficulty, weather, and betting lines. Start/sit calls
+  are recorded and graded against actual results (the accuracy tracker).
+- **Trade analyzer** — 0-100 player values (two-season blend, position
+  percentile), a who-wins score with a strict A-F grading rubric, and
+  sweetener suggestions to even lopsided deals.
+- **Betting edge** — live line shopping across US sportsbooks: best price on
+  every moneyline/spread/total, ranked by how much books disagree.
+- **Draft assistant, schedule-strength heatmap, player comparison charts,
+  multi-league switcher, injury email alerts, dark mode, installable PWA.**
+
 ## Architecture
 
 ```
