@@ -9,17 +9,24 @@ from app.database import get_db
 from app.models import LeagueConnection, Player, Roster, User
 from app.services.ai_service import generate_response
 from app.services.context_builder import player_package
+from app.services.value_service import compute_player_values, side_total
 from app.utils.security import get_current_user
 
 router = APIRouter(prefix="/api/trade", tags=["trade"])
 
 TRADE_QUESTION = (
     "Evaluate this trade. The user GIVES the players in trade.give and "
-    "RECEIVES the players in trade.receive. Grade each side of the trade A-F, "
+    "RECEIVES the players in trade.receive. Each player has a trade_value "
+    "(0-100, percentile of recency-weighted PPR production at their position) "
+    "and the totals for each side are in trade.value_summary — anchor your "
+    "verdict in those numbers plus the weekly stats. Grade each side A-F, "
     "explain who wins and why, and call out any positional depth problems this "
     "trade creates for the user's roster. End with a clear accept/reject/counter "
     "recommendation."
 )
+
+# Value gap below which a trade is considered roughly fair
+EVEN_THRESHOLD = 8
 
 
 class TradeRequest(BaseModel):
@@ -28,8 +35,20 @@ class TradeRequest(BaseModel):
     receive: list[str] = Field(min_length=1, max_length=6)
 
 
+class TradePlayerValue(BaseModel):
+    id: str
+    name: str
+    value: int
+    ppg: float | None = None
+
+
 class TradeResponse(BaseModel):
     analysis: str
+    give_value: int
+    receive_value: int
+    verdict: str
+    player_values: list[TradePlayerValue]
+    sweeteners: list[TradePlayerValue]
 
 
 @router.post("/analyze", response_model=TradeResponse)
@@ -53,6 +72,9 @@ async def analyze_trade(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "League connection not found")
 
     scoring_type = conn.scoring_type or "ppr"
+    values = await compute_player_values(db)
+
+    name_cache: dict[str, str] = {}
 
     async def packages(ids: list[str]) -> list[dict]:
         out = []
@@ -60,7 +82,10 @@ async def analyze_trade(
             player = await db.get(Player, pid)
             if player is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, f"Player {pid} not found")
-            out.append(await player_package(db, player, conn.season, scoring_type))
+            name_cache[pid] = player.full_name
+            pkg = await player_package(db, player, conn.season, scoring_type)
+            pkg["trade_value"] = values.get(pid, {}).get("value")
+            out.append(pkg)
         return out
 
     context: dict = {
@@ -77,7 +102,24 @@ async def analyze_trade(
         },
     }
 
-    # Include the user's roster so depth implications can be judged
+    give_value = side_total(values, body.give)
+    receive_value = side_total(values, body.receive)
+    diff = receive_value - give_value
+    if abs(diff) < EVEN_THRESHOLD:
+        verdict = "Roughly even trade"
+    elif diff > 0:
+        verdict = f"You win by {diff} points"
+    else:
+        verdict = f"You lose by {-diff} points"
+    context["trade"]["value_summary"] = {
+        "you_give_total": give_value,
+        "you_receive_total": receive_value,
+        "verdict": verdict,
+    }
+
+    # Include the user's roster so depth implications can be judged, and to
+    # suggest sweeteners that even out a lopsided trade in the user's favor.
+    sweeteners: list[TradePlayerValue] = []
     roster = (
         await db.execute(
             select(Roster).where(
@@ -91,10 +133,50 @@ async def analyze_trade(
         ).scalars().all()
         context["user_roster"] = {
             "players": [
-                {"name": p.full_name, "position": p.position, "team": p.team}
+                {
+                    "name": p.full_name,
+                    "position": p.position,
+                    "team": p.team,
+                    "trade_value": values.get(p.id, {}).get("value"),
+                }
                 for p in players
             ]
         }
+        if diff >= EVEN_THRESHOLD:
+            in_trade = set(body.give) | set(body.receive)
+            candidates = [
+                (p, values[p.id]["value"])
+                for p in players
+                if p.id in values and p.id not in in_trade
+            ]
+            candidates.sort(key=lambda c: abs(c[1] - diff))
+            sweeteners = [
+                TradePlayerValue(
+                    id=p.id,
+                    name=p.full_name,
+                    value=v,
+                    ppg=values[p.id].get("ppg"),
+                )
+                for p, v in candidates[:3]
+            ]
+            context["trade"]["sweetener_candidates"] = [
+                {"name": s.name, "trade_value": s.value} for s in sweeteners
+            ]
 
     analysis = await generate_response(TRADE_QUESTION, context)
-    return TradeResponse(analysis=analysis)
+    return TradeResponse(
+        analysis=analysis,
+        give_value=give_value,
+        receive_value=receive_value,
+        verdict=verdict,
+        player_values=[
+            TradePlayerValue(
+                id=pid,
+                name=name_cache.get(pid, pid),
+                value=values.get(pid, {}).get("value", 0),
+                ppg=values.get(pid, {}).get("ppg"),
+            )
+            for pid in [*body.give, *body.receive]
+        ],
+        sweeteners=sweeteners,
+    )
