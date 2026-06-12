@@ -1,0 +1,17 @@
+{
+  "name": "Fantasy Football AI",
+  "short_name": "FFAI",
+  "description": "An AI assistant that knows your fantasy league as well as you do.",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#052e16",
+  "theme_color": "#16a34a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

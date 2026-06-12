@@ -1,0 +1,199 @@
+"use client";
+
+import { useState } from "react";
+import { useQueries } from "@tanstack/react-query";
+import Navbar from "@/components/Navbar";
+import { api } from "@/lib/api";
+import type { PlayerCard, WeeklyStat } from "@/lib/types";
+import { useLeague } from "@/hooks/useLeague";
+import { positionColor } from "@/lib/utils";
+import { Search, X } from "lucide-react";
+import {
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+
+const COLORS = ["#16a34a", "#2563eb", "#ea580c"];
+const METRICS = [
+  { key: "fantasy_points_ppr", label: "PPR points" },
+  { key: "targets", label: "Targets" },
+  { key: "receiving_yards", label: "Receiving yards" },
+  { key: "rush_yards", label: "Rushing yards" },
+] as const;
+
+export default function ComparePage() {
+  useLeague(); // auth/redirect guard
+  const [players, setPlayers] = useState<PlayerCard[]>([]);
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<PlayerCard[]>([]);
+  const [metric, setMetric] = useState<(typeof METRICS)[number]["key"]>(
+    "fantasy_points_ppr"
+  );
+
+  async function search(value: string) {
+    setQ(value);
+    if (value.length < 2) {
+      setResults([]);
+      return;
+    }
+    try {
+      const found = await api<{ id: string; full_name: string; position: string | null; team: string | null }[]>(
+        `/api/players/search?q=${encodeURIComponent(value)}`
+      );
+      setResults(
+        found
+          .filter((p) => !players.some((x) => x.id === p.id))
+          .slice(0, 6)
+          .map((p) => ({ id: p.id, name: p.full_name, position: p.position, team: p.team }))
+      );
+    } catch {
+      setResults([]);
+    }
+  }
+
+  const statQueries = useQueries({
+    queries: players.map((p) => ({
+      queryKey: ["player-stats", p.id],
+      queryFn: () => api<WeeklyStat[]>(`/api/players/${p.id}/stats`),
+    })),
+  });
+
+  // Merge each player's last 10 weeks into one chart dataset keyed by season-week
+  const merged: Record<string, Record<string, number | string>> = {};
+  statQueries.forEach((sq, idx) => {
+    const stats = (sq.data ?? [])
+      .slice()
+      .sort((a, b) => a.season - b.season || a.week - b.week)
+      .slice(-10);
+    for (const s of stats) {
+      const key = `${s.season}W${s.week}`;
+      merged[key] ??= { label: `W${s.week}` };
+      merged[key][players[idx].name] = Number(
+        (s as unknown as Record<string, number | null>)[metric] ?? 0
+      );
+    }
+  });
+  const chartData = Object.entries(merged)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([, v]) => v);
+
+  return (
+    <>
+      <Navbar />
+      <main className="mx-auto max-w-4xl px-4 py-8">
+        <h1 className="text-2xl font-bold">Compare players</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          Overlay up to 3 players to see who&apos;s trending up.
+        </p>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {players.map((p, i) => (
+            <span
+              key={p.id}
+              className="flex items-center gap-2 rounded-full border border-gray-200 bg-white py-1 pl-1 pr-2 text-sm"
+            >
+              <span
+                className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white ${positionColor(p.position)}`}
+                style={{ backgroundColor: COLORS[i] }}
+              >
+                {p.position}
+              </span>
+              {p.name}
+              <button
+                onClick={() => setPlayers(players.filter((x) => x.id !== p.id))}
+                aria-label={`Remove ${p.name}`}
+              >
+                <X className="h-3.5 w-3.5 text-gray-400" />
+              </button>
+            </span>
+          ))}
+
+          {players.length < 3 && (
+            <div className="relative">
+              <div className="flex items-center gap-2 rounded-full border border-gray-300 px-3 py-1.5">
+                <Search className="h-3.5 w-3.5 text-gray-400" />
+                <input
+                  value={q}
+                  onChange={(e) => search(e.target.value)}
+                  placeholder="Add player…"
+                  className="w-36 border-0 bg-transparent text-sm focus:outline-none"
+                />
+              </div>
+              {results.length > 0 && (
+                <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                  {results.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        setPlayers([...players, p]);
+                        setQ("");
+                        setResults([]);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"
+                    >
+                      <span
+                        className={`flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold text-white ${positionColor(p.position)}`}
+                      >
+                        {p.position}
+                      </span>
+                      {p.name} <span className="text-xs text-gray-400">{p.team}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 flex gap-1.5">
+          {METRICS.map((m) => (
+            <button
+              key={m.key}
+              onClick={() => setMetric(m.key)}
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                metric === m.key
+                  ? "bg-green-600 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4">
+          {players.length === 0 ? (
+            <p className="py-16 text-center text-sm text-gray-400">
+              Add players above to start comparing.
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
+                <XAxis dataKey="label" fontSize={12} tickLine={false} />
+                <YAxis fontSize={12} tickLine={false} axisLine={false} />
+                <Tooltip />
+                <Legend />
+                {players.map((p, i) => (
+                  <Line
+                    key={p.id}
+                    type="monotone"
+                    dataKey={p.name}
+                    stroke={COLORS[i]}
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    connectNulls
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </main>
+    </>
+  );
+}

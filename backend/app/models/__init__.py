@@ -4,7 +4,9 @@ from app.models.league import LeagueConnection
 from app.models.matchup import Matchup
 from app.models.player import Player
 from app.models.roster import AvailablePlayer, Roster
+from app.models.schedule import NflSchedule
 from app.models.stats import PlayerStatsWeekly
+from app.models.tracking import InjuryEvent, Recommendation
 from app.models.user import User
 
 __all__ = [
@@ -17,4 +19,7 @@ __all__ = [
     "Matchup",
     "GameCondition",
     "ChatMessage",
+    "NflSchedule",
+    "InjuryEvent",
+    "Recommendation",
 ]

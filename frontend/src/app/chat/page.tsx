@@ -4,10 +4,10 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import ChatMessageBubble from "@/components/ChatMessage";
-import { api } from "@/lib/api";
+import { api, apiStream } from "@/lib/api";
 import type { ChatMessage } from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
-import { Send } from "lucide-react";
+import { Send, Square } from "lucide-react";
 
 const starters = [
   "Who should I start at FLEX this week?",
@@ -24,14 +24,18 @@ function ChatInner() {
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const sentPrefill = useRef(false);
 
+  // History is scoped to the active league
   useEffect(() => {
-    api<ChatMessage[]>("/api/chat/history?limit=50")
+    if (!league) return;
+    setLoaded(false);
+    api<ChatMessage[]>(`/api/chat/history?limit=50&connection_id=${league.id}`)
       .then(setMessages)
       .catch(() => {})
       .finally(() => setLoaded(true));
-  }, []);
+  }, [league?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -41,25 +45,52 @@ function ChatInner() {
     const q = text.trim();
     if (!q || busy) return;
     setInput("");
-    setMessages((m) => [...m, { role: "user", content: q }]);
+    setMessages((m) => [...m, { role: "user", content: q }, { role: "assistant", content: "" }]);
     setBusy(true);
+    abortRef.current = new AbortController();
     try {
-      const resp = await api<{ response: string }>("/api/chat", {
-        method: "POST",
-        body: JSON.stringify({ message: q, connection_id: league?.id ?? null }),
-      });
-      setMessages((m) => [...m, { role: "assistant", content: resp.response }]);
-    } catch (err) {
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content: `Something went wrong: ${err instanceof Error ? err.message : "unknown error"}`,
+      await apiStream(
+        "/api/chat/stream",
+        { message: q, connection_id: league?.id ?? null },
+        (chunk) => {
+          setMessages((m) => {
+            const next = [...m];
+            const last = next[next.length - 1];
+            next[next.length - 1] = { ...last, content: last.content + chunk };
+            return next;
+          });
         },
-      ]);
+        abortRef.current.signal
+      );
+      // Strip the PICK: line the backend uses for accuracy tracking
+      setMessages((m) => {
+        const next = [...m];
+        const last = next[next.length - 1];
+        next[next.length - 1] = {
+          ...last,
+          content: last.content.replace(/\n?PICK:\s*.+\s*$/, "").trimEnd(),
+        };
+        return next;
+      });
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setMessages((m) => {
+          const next = [...m];
+          next[next.length - 1] = {
+            role: "assistant",
+            content: `Something went wrong: ${err instanceof Error ? err.message : "unknown error"}`,
+          };
+          return next;
+        });
+      }
     } finally {
       setBusy(false);
+      abortRef.current = null;
     }
+  }
+
+  function stop() {
+    abortRef.current?.abort();
   }
 
   // Prefill from dashboard quick-ask buttons (?q=...)
@@ -79,7 +110,9 @@ function ChatInner() {
         <div className="flex-1 space-y-4 overflow-y-auto py-6">
           {messages.length === 0 && loaded && (
             <div className="mt-16 text-center">
-              <h2 className="text-xl font-bold">Ask anything about your league</h2>
+              <h2 className="text-xl font-bold">
+                Ask anything about {league?.league_name ?? "your league"}
+              </h2>
               <p className="mt-1 text-sm text-gray-500">
                 The AI sees your roster, matchup, waivers, injuries, Vegas lines,
                 and weather.
@@ -100,7 +133,7 @@ function ChatInner() {
           {messages.map((m, i) => (
             <ChatMessageBubble key={i} message={m} />
           ))}
-          {busy && (
+          {busy && messages[messages.length - 1]?.content === "" && (
             <p className="text-sm text-gray-400">Checking the data…</p>
           )}
           <div ref={bottomRef} />
@@ -118,13 +151,25 @@ function ChatInner() {
             placeholder="Should I start Chase or Lamb this week?"
             className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-green-500 focus:outline-none"
           />
-          <button
-            type="submit"
-            disabled={busy || !input.trim()}
-            className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            <Send className="h-4 w-4" />
-          </button>
+          {busy ? (
+            <button
+              type="button"
+              onClick={stop}
+              className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
+              aria-label="Stop generating"
+            >
+              <Square className="h-4 w-4" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+              aria-label="Send"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          )}
         </form>
       </main>
     </div>
