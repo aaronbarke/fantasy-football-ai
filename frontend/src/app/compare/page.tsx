@@ -68,15 +68,15 @@ export default function ComparePage() {
   const merged: Record<string, Record<string, number | string>> = {};
   const averages: (number | null)[] = [];
   statQueries.forEach((sq, idx) => {
+    // Regular season only — weeks 19+ are playoffs, fantasy ends week 18
     const sorted = (sq.data ?? [])
-      .slice()
+      .filter((s) => s.week <= 18)
       .sort((a, b) => a.season - b.season || a.week - b.week);
     let stats = sorted;
     if (range === "season") {
       // Full most-recent season for this player, from week 1
       const latest = sorted.length ? sorted[sorted.length - 1].season : null;
-      // Regular season only — weeks 19+ are playoffs
-      stats = sorted.filter((s) => s.season === latest && s.week <= 18);
+      stats = sorted.filter((s) => s.season === latest);
     } else {
       stats = sorted.slice(range === "last10" ? -10 : -5);
     }
