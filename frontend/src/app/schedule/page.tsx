@@ -63,9 +63,15 @@ export default function SchedulePage() {
         {isLoading && <p className="mt-6 text-sm text-gray-400">Crunching the schedule…</p>}
         {error ? (
           <p className="mt-6 text-sm text-gray-400">
-            No data yet — sync your league and make sure player stats are seeded.
+            No data yet — this fills in once your roster has players (after
+            your draft, hit Sync on the dashboard).
           </p>
         ) : null}
+        {data && data.players.length === 0 && (
+          <p className="mt-6 text-sm text-gray-400">
+            Your roster is empty — the heatmap appears after draft day.
+          </p>
+        )}
 
         {data && (
           <div className="mt-6 overflow-x-auto rounded-xl border border-gray-200 bg-white">
