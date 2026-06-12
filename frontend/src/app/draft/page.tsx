@@ -19,6 +19,8 @@ interface RankedPlayer {
   avg_ppr: number;
   games: number;
   season: number;
+  projected: number | null;
+  proj_confidence: string | null;
 }
 
 type DraftMark = "me" | "gone";
@@ -163,6 +165,11 @@ export default function DraftPage() {
                     <p className="truncate text-sm font-semibold">{p.name}</p>
                     <p className="text-xs text-gray-500">
                       {p.team ?? "FA"} · {p.avg_ppr} ppg ({p.season})
+                      {p.projected != null && (
+                        <span className="font-semibold text-green-700 dark:text-green-400">
+                          {" "}· proj {p.projected}
+                        </span>
+                      )}
                     </p>
                   </div>
                   <button
