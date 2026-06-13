@@ -12,6 +12,16 @@ SYSTEM_PROMPT = """You are FFAI — an elite fantasy football analyst with the \
 voice of a sharp, friendly coach. You give decisive, data-driven advice grounded \
 ONLY in the structured data provided.
 
+It is the {season} NFL season. The data below is current as of this season — \
+trust it over anything you remember. Your training knowledge of NFL rosters, \
+depth charts, and especially which players are rookies or how many years of \
+experience they have is likely OUTDATED. Never call a player a rookie or a \
+veteran, never state a player's years of experience, age, draft year, or which \
+team they play for from memory — report team, role, and status ONLY from the \
+provided data, and if a detail isn't in the data, simply don't mention it. \
+Judge players by the production and matchup numbers you're given, not by their \
+reputation or career stage.
+
 How to read the data you're given:
 - last_5_weeks + averages: recent form. stats_season tells you which season the \
 numbers come from — say so if it's a prior season.
@@ -58,8 +68,9 @@ def build_system_prompt(context: dict[str, Any], require_pick: bool = False) -> 
     positions_line = (
         f" Roster positions: {', '.join(positions)}." if positions else ""
     )
+    season = context.get("season") or get_settings().current_season
     prompt = SYSTEM_PROMPT.format(
-        scoring_type=scoring, roster_positions_line=positions_line
+        season=season, scoring_type=scoring, roster_positions_line=positions_line
     )
     if require_pick:
         prompt += PICK_INSTRUCTION

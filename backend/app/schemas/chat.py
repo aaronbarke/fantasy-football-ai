@@ -7,6 +7,9 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     connection_id: str | None = None
     message: str = Field(min_length=1, max_length=4000)
+    # Quick-ask deep links from other pages set this so the answer starts a
+    # clean thread instead of inheriting the running conversation.
+    fresh: bool = False
 
 
 class ChatResponse(BaseModel):

@@ -269,7 +269,7 @@ async def build_context(
     season = conn.season if conn else 2026
     scoring_type = (conn.scoring_type if conn else None) or "ppr"
 
-    context: dict[str, Any] = {"question_type": intent}
+    context: dict[str, Any] = {"question_type": intent, "season": season}
 
     if conn:
         context["league_settings"] = {

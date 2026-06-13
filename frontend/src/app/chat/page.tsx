@@ -27,10 +27,17 @@ function ChatInner() {
   const abortRef = useRef<AbortController | null>(null);
   const sentPrefill = useRef(false);
 
-  // History is scoped to the active league
+  // History is scoped to the active league. A quick-ask deep link (?q=) starts
+  // a clean thread instead of loading the running conversation, so the answer
+  // isn't colored by an unrelated last chat.
   useEffect(() => {
     if (!league) return;
     setLoaded(false);
+    if (params.get("q")) {
+      setMessages([]);
+      setLoaded(true);
+      return;
+    }
     api<ChatMessage[]>(`/api/chat/history?limit=50&connection_id=${league.id}`)
       .then(setMessages)
       .catch(() => {})
@@ -41,7 +48,7 @@ function ChatInner() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
-  async function send(text: string) {
+  async function send(text: string, fresh = false) {
     const q = text.trim();
     if (!q || busy) return;
     setInput("");
@@ -51,7 +58,7 @@ function ChatInner() {
     try {
       await apiStream(
         "/api/chat/stream",
-        { message: q, connection_id: league?.id ?? null },
+        { message: q, connection_id: league?.id ?? null, fresh },
         (chunk) => {
           setMessages((m) => {
             const next = [...m];
@@ -98,7 +105,7 @@ function ChatInner() {
     const q = params.get("q");
     if (q && loaded && league && !sentPrefill.current) {
       sentPrefill.current = true;
-      send(q);
+      send(q, true); // deep-linked quick-ask: fresh, standalone answer
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, loaded, league]);
