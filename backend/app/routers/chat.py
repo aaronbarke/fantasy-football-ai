@@ -151,7 +151,7 @@ async def chat(
 ):
     conn = await _resolve_connection(db, user, body.connection_id)
     intent, context = await build_context(db, conn, body.message)
-    history = await _load_history(db, user, conn)
+    history = [] if body.fresh else await _load_history(db, user, conn)
     track = _should_track_pick(intent, context)
 
     raw = await generate_response(body.message, context, history, require_pick=track)
@@ -170,7 +170,7 @@ async def chat_stream(
     """Server-sent events: data: {"text": ...} chunks, then data: [DONE]."""
     conn = await _resolve_connection(db, user, body.connection_id)
     intent, context = await build_context(db, conn, body.message)
-    history = await _load_history(db, user, conn)
+    history = [] if body.fresh else await _load_history(db, user, conn)
     track = _should_track_pick(intent, context)
 
     async def event_gen():
