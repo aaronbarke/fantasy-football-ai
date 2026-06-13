@@ -39,6 +39,10 @@ REGULAR_SEASON_MAX_WEEK = 18
 # Baseline blend
 RECENT_WINDOW = 4          # last N weeks of the latest season count double
 PRIOR_SEASON_WEIGHT = 0.5  # latest season counts 2x the season before
+# A proven player can't fall below this fraction of their better of the last two
+# seasons — so one down/injury year (or a cold streak) doesn't tank an
+# established star's trade value.
+PEAK_FLOOR = 0.90
 
 # Momentum
 ELITE_ANCHOR = 20.0        # ppg that reads as "elite tier" for tier scaling
@@ -46,13 +50,14 @@ RECENT_GAMES = 5           # games of recent form considered for momentum
 RECENT_WEIGHTS = [1.0, 0.8, 0.6, 0.45, 0.35]  # most-recent game first
 RESPONSIVENESS = 0.6       # global scalar on how much momentum moves the baseline
 
-# Currency curve (VOR -> value). GAMMA > 1 gives studs a scarcity premium.
-SCALE = 3.2
-GAMMA = 1.15
+# Value curve (VOR -> value). Linear with a deep replacement keeps the spread
+# realistic — the WR1 is worth a few times a solid starter, not 8x.
+SCALE = 4.5
+GAMMA = 1.0
 
-# Replacement-level ranks per position (12-team-standard market with flex).
-# value = production above the player sitting at this rank in the position.
-REPLACEMENT_RANK = {"QB": 14, "RB": 30, "WR": 36, "TE": 14}
+# Replacement-level ranks per position (~last rostered in a 12-team league).
+# Deeper than "last starter" so above-average players keep meaningful value.
+REPLACEMENT_RANK = {"QB": 18, "RB": 40, "WR": 50, "TE": 16}
 
 
 def _blended_base(samples: list[tuple[int, int, float]], latest_season: int, recent_cutoff: int) -> float:
@@ -156,7 +161,14 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
         if e["position"] not in VALUED_POSITIONS or len(e["samples"]) < MIN_GAMES:
             continue
         samples = e["samples"]
-        base = _blended_base(samples, int(latest_season), recent_cutoff)
+        blended = _blended_base(samples, int(latest_season), recent_cutoff)
+        # Peak floor: best single-season average of the last two seasons, so a
+        # down/injury year can dent but not crater a proven player.
+        season_pts: dict[int, list[float]] = defaultdict(list)
+        for season, _wk, p in samples:
+            season_pts[season].append(p)
+        peak = max(sum(v) / len(v) for v in season_pts.values())
+        base = max(blended, PEAK_FLOOR * peak)
         if base <= 0:
             continue
         recent_points = [
@@ -166,6 +178,7 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
         computed[pid] = {
             "base": base,
             "adj": adj,
+            "peak": peak,
             "games": len(samples),
             "position": e["position"],
         }
@@ -186,8 +199,11 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
         repl = replacement.get(c["position"], 0.0)
         delta = c["adj"] - c["base"]
         trend = "rising" if delta >= 1 else "falling" if delta <= -1 else "steady"
+        # Value can't drop below the proven floor even in a slump; a hot streak
+        # (adj above base) still lifts it.
+        value_ppg = max(c["adj"], PEAK_FLOOR * c["peak"])
         values[pid] = {
-            "value": _value_from_vor(c["adj"], repl),
+            "value": _value_from_vor(value_ppg, repl),
             "ppg": round(c["adj"], 1),
             "base_ppg": round(c["base"], 1),
             "trend": trend,
