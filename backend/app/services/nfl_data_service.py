@@ -77,17 +77,26 @@ def fetch_weekly_dataframe(seasons: list[int]):
     import pandas as pd
 
     frames = []
+    errors: list[Exception] = []
     for season in seasons:
+        season_frame = None
         last_err: Exception | None = None
         for url_tpl in NFLVERSE_STATS_URLS:
             try:
-                frames.append(pd.read_parquet(_download(url_tpl.format(season=season))))
+                season_frame = pd.read_parquet(_download(url_tpl.format(season=season)))
                 last_err = None
                 break
             except Exception as exc:  # noqa: BLE001 — try next URL naming scheme
                 last_err = exc
-        if last_err is not None:
-            raise last_err
+        if season_frame is not None:
+            frames.append(season_frame)
+        elif last_err is not None:
+            # A season with no data yet (e.g. the upcoming season in preseason)
+            # is expected — skip it and keep the seasons that do exist.
+            errors.append(last_err)
+            logger.warning("Weekly stats unavailable for %s: %s", season, last_err)
+    if not frames:
+        raise errors[0] if errors else RuntimeError("No weekly stats fetched")
     return pd.concat(frames, ignore_index=True)
 
 

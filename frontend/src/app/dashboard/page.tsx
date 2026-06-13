@@ -16,6 +16,7 @@ import {
   ArrowRight,
   ChevronRight,
   Crown,
+  Database,
   MessageCircle,
   RefreshCw,
   Swords,
@@ -75,6 +76,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const { league } = useLeague();
   const [syncing, setSyncing] = useState(false);
+  const [refreshingStats, setRefreshingStats] = useState(false);
 
   const { data: roster, isLoading: rosterLoading } = useQuery({
     queryKey: ["roster", league?.id],
@@ -138,6 +140,16 @@ export default function DashboardPage() {
     }
   }
 
+  async function refreshStats() {
+    setRefreshingStats(true);
+    try {
+      await api(`/api/admin/refresh-stats`, { method: "POST" });
+      window.location.reload();
+    } finally {
+      setRefreshingStats(false);
+    }
+  }
+
   return (
     <>
       <Navbar />
@@ -159,14 +171,26 @@ export default function DashboardPage() {
             )}
           </div>
 
-          <button
-            onClick={syncNow}
-            disabled={syncing}
-            className="flex items-center gap-1.5 self-start rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
-            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-            Sync
-          </button>
+          <div className="flex items-center gap-2 self-start">
+            <button
+              onClick={syncNow}
+              disabled={syncing}
+              title="Re-sync this league's rosters, standings, and matchups"
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+              Sync league
+            </button>
+            <button
+              onClick={refreshStats}
+              disabled={refreshingStats}
+              title="Re-pull this week's NFL stats — refreshes values, projections & schedule strength"
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              <Database className={`h-4 w-4 ${refreshingStats ? "animate-pulse" : ""}`} />
+              {refreshingStats ? "Refreshing…" : "Refresh stats"}
+            </button>
+          </div>
         </div>
 
         {/* ── Metric ribbon: the team's vitals ── */}
