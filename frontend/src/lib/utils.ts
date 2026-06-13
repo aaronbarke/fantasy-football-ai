@@ -2,8 +2,9 @@ export function injuryColor(status: string | null | undefined): string {
   if (!status) return "bg-green-100 text-green-800";
   const s = status.toLowerCase();
   if (s.includes("out") || s.includes("ir") || s.includes("doubtful"))
-    return "bg-red-100 text-red-800";
-  if (s.includes("questionable")) return "bg-yellow-100 text-yellow-800";
+    return "bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300";
+  if (s.includes("questionable"))
+    return "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300";
   return "bg-green-100 text-green-800";
 }
 

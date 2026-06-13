@@ -139,7 +139,7 @@ export default function BettingPage() {
                   </span>
                 </p>
                 {g.edge_score >= 20 && (
-                  <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+                  <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
                     High shop value
                   </span>
                 )}

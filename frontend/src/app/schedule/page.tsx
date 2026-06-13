@@ -30,11 +30,13 @@ interface StrengthData {
 }
 
 function cellColor(rank: number | null): string {
+  // Green/gray pick up their dark-mode tints from the global remap layer; the
+  // warm tiers need explicit dark variants or they glow cream on the dark theme.
   if (rank == null) return "bg-gray-100 text-gray-400";
   if (rank <= 8) return "bg-green-100 text-green-800";
   if (rank <= 16) return "bg-green-50 text-green-700";
-  if (rank <= 24) return "bg-yellow-100 text-yellow-800";
-  return "bg-red-100 text-red-800";
+  if (rank <= 24) return "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300";
+  return "bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300";
 }
 
 export default function SchedulePage() {
