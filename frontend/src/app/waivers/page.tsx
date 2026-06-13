@@ -86,7 +86,7 @@ export default function WaiversPage() {
                 </span>
               )}
               {w.trending_count != null && (
-                <span className="flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700">
+                <span className="flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700 dark:bg-orange-500/15 dark:text-orange-300">
                   <Flame className="h-3 w-3" />
                   {Intl.NumberFormat("en", { notation: "compact" }).format(
                     w.trending_count

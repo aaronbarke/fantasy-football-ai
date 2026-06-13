@@ -238,12 +238,12 @@ export default function GamePlanPage() {
 
             {/* Swap alerts */}
             {plan.swaps && plan.swaps.length > 0 && (
-              <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-5">
-                <p className="flex items-center gap-2 text-sm font-bold text-amber-800">
+              <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-500/25 dark:bg-amber-500/10">
+                <p className="flex items-center gap-2 text-sm font-bold text-amber-800 dark:text-amber-300">
                   <ArrowRightLeft className="h-4 w-4" />
                   {plan.swaps.length} lineup change{plan.swaps.length > 1 ? "s" : ""} recommended
                 </p>
-                <ul className="mt-2 space-y-1 text-sm text-amber-900">
+                <ul className="mt-2 space-y-1 text-sm text-amber-900 dark:text-amber-100/80">
                   {plan.swaps.map((s, i) => (
                     <li key={i}>
                       Start <strong>{s.start.name}</strong> ({s.start.projected} proj)
