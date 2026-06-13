@@ -6,6 +6,7 @@ import Navbar from "@/components/Navbar";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import PlayerAvatar from "@/components/PlayerAvatar";
+import { positionColor } from "@/lib/utils";
 import { ArrowRightLeft, ClipboardList, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -101,7 +102,14 @@ function PlayerRow({ p, slot }: { p: PlanPlayer | null; slot?: string }) {
         {slot && (
           <span className="w-10 shrink-0 text-xs font-bold text-gray-400">{slot}</span>
         )}
-        <PlayerAvatar id={p.id} name={p.name} position={p.position} team={p.team} size={34} />
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded text-[10px] font-bold text-white ${positionColor(p.position)}`}
+          >
+            {p.position}
+          </span>
+          <PlayerAvatar id={p.id} name={p.name} position={p.position} team={p.team} size={34} />
+        </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">
             {p.name}
@@ -112,7 +120,7 @@ function PlayerRow({ p, slot }: { p: PlanPlayer | null; slot?: string }) {
             )}
           </p>
           <p className="text-xs text-gray-500">
-            {p.position} · {p.team ?? "FA"}
+            {p.team ?? "FA"}
             {p.opponent ? ` vs ${p.opponent}` : ""}
             {p.confidence ? ` · ${p.confidence} confidence` : ""}
           </p>

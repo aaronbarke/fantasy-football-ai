@@ -9,7 +9,7 @@ import PlayerAvatar from "@/components/PlayerAvatar";
 import { api } from "@/lib/api";
 import type { Matchup, Roster, StandingsEntry } from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
-import { formatRecord } from "@/lib/utils";
+import { formatRecord, positionColor } from "@/lib/utils";
 import {
   Activity,
   AlertTriangle,
@@ -314,13 +314,20 @@ export default function DashboardPage() {
                 <ul className="mt-4 space-y-3">
                   {injured.slice(0, 4).map((p) => (
                     <li key={p.id} className="flex items-center gap-3">
-                      <PlayerAvatar
-                        id={p.id}
-                        name={p.name}
-                        position={p.position}
-                        team={p.team}
-                        size={32}
-                      />
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span
+                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white ${positionColor(p.position)}`}
+                        >
+                          {p.position}
+                        </span>
+                        <PlayerAvatar
+                          id={p.id}
+                          name={p.name}
+                          position={p.position}
+                          team={p.team}
+                          size={32}
+                        />
+                      </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
                           {p.name}

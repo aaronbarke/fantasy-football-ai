@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import type { WaiverPlayer } from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
 import PlayerAvatar from "@/components/PlayerAvatar";
+import { positionColor } from "@/lib/utils";
 import { Flame } from "lucide-react";
 
 const positions = ["ALL", "QB", "RB", "WR", "TE", "K", "DEF"];
@@ -71,18 +72,23 @@ export default function WaiversPage() {
               key={w.player.id}
               className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-3"
             >
-              <PlayerAvatar
-                id={w.player.id}
-                name={w.player.name}
-                position={w.player.position}
-                team={w.player.team}
-                size={38}
-              />
+              <div className="flex shrink-0 items-center gap-2">
+                <span
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-xs font-bold text-white ${positionColor(w.player.position)}`}
+                >
+                  {w.player.position ?? "?"}
+                </span>
+                <PlayerAvatar
+                  id={w.player.id}
+                  name={w.player.name}
+                  position={w.player.position}
+                  team={w.player.team}
+                  size={38}
+                />
+              </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{w.player.name}</p>
-                <p className="text-xs text-gray-500">
-                  {w.player.position ?? "?"} · {w.player.team ?? "FA"}
-                </p>
+                <p className="text-xs text-gray-500">{w.player.team ?? "FA"}</p>
               </div>
               {w.recent_ppr_avg != null && (
                 <span className="text-sm text-gray-600">
