@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import create_all
 from app.routers import (
+    admin,
     auth,
     betting,
     chat,
@@ -63,6 +64,7 @@ app.include_router(trade.router)
 app.include_router(recommendations.router)
 app.include_router(betting.router)
 app.include_router(gameplan.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")
