@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import InjuryBadge from "@/components/InjuryBadge";
+import PlayerAvatar from "@/components/PlayerAvatar";
 import { api } from "@/lib/api";
 import type { Matchup, Roster, StandingsEntry } from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
@@ -313,9 +314,13 @@ export default function DashboardPage() {
                 <ul className="mt-4 space-y-3">
                   {injured.slice(0, 4).map((p) => (
                     <li key={p.id} className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-[10px] font-bold text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                        {p.position}
-                      </div>
+                      <PlayerAvatar
+                        id={p.id}
+                        name={p.name}
+                        position={p.position}
+                        team={p.team}
+                        size={32}
+                      />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
                           {p.name}
