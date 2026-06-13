@@ -16,26 +16,28 @@ router = APIRouter(prefix="/api/trade", tags=["trade"])
 
 TRADE_QUESTION = (
     "Evaluate this trade. The user GIVES the players in trade.give and "
-    "RECEIVES the players in trade.receive. Each player has a trade_value "
-    "(0-100, percentile of recency-weighted PPR production at their position) "
-    "and the totals for each side are in trade.value_summary — anchor your "
-    "verdict in those numbers plus the weekly stats.\n\n"
-    "Grading rubric (apply strictly):\n"
-    "- Value gap under 8 points: even trade — grade both sides in the same "
-    "letter band; the verdict hinges on roster fit, not raw value.\n"
-    "- Gap 8-19: meaningful edge. Winner gets a full letter grade above loser.\n"
-    "- Gap 20+: lopsided. The losing side cannot grade above C, and you should "
-    "propose a specific counter using trade.sweetener_candidates if provided.\n"
-    "- Positional scarcity matters: an elite RB/TE is worth more than equal "
-    "value at WR. Consuming a roster's last startable depth at a position "
-    "drops that side half a grade.\n\n"
+    "RECEIVES the players in trade.receive. Each player has a trade_value — a "
+    "currency-style market value from Value Over Replacement (higher = more "
+    "valuable; elite players run 40-70+, startable contributors 15-35, depth "
+    "under 10). Some players also carry a trend (rising/falling) from recent "
+    "form. trade.value_summary has each side's total and the gap as a percent "
+    "of the larger side — anchor your verdict in those numbers plus the stats.\n\n"
+    "Grading rubric (apply strictly, judged by the GAP %):\n"
+    "- Gap under 8%: even trade — grade both sides in the same letter band; the "
+    "verdict hinges on roster fit, not raw value.\n"
+    "- Gap 8-20%: meaningful edge. Winner gets a full letter grade above loser.\n"
+    "- Gap over 20%: lopsided. The losing side cannot grade above C, and you "
+    "should propose a specific counter using trade.sweetener_candidates.\n"
+    "- Positional scarcity is already priced into the values (VOR), so trust the "
+    "totals; still flag when a trade guts a roster's last startable depth at a "
+    "position, and weigh a rising/falling trend when the call is close.\n\n"
     "Structure: bold one-line verdict first, then a Side Grades section, then "
     "roster-fit analysis, then a clear ACCEPT / REJECT / COUNTER call with "
     "confidence. If countering, name the exact players to add."
 )
 
-# Value gap below which a trade is considered roughly fair
-EVEN_THRESHOLD = 8
+# Gap (as a fraction of the larger side) below which a trade is roughly fair
+EVEN_GAP_PCT = 0.08
 
 
 class TradeRequest(BaseModel):
@@ -49,6 +51,7 @@ class TradePlayerValue(BaseModel):
     name: str
     value: int
     ppg: float | None = None
+    trend: str | None = None
 
 
 class TradeResponse(BaseModel):
@@ -114,15 +117,19 @@ async def analyze_trade(
     give_value = side_total(values, body.give)
     receive_value = side_total(values, body.receive)
     diff = receive_value - give_value
-    if abs(diff) < EVEN_THRESHOLD:
+    bigger = max(give_value, receive_value, 1)
+    gap_pct = abs(diff) / bigger
+    if gap_pct < EVEN_GAP_PCT:
         verdict = "Roughly even trade"
     elif diff > 0:
-        verdict = f"You win by {diff} points"
+        verdict = f"You win by ${diff}"
     else:
-        verdict = f"You lose by {-diff} points"
+        verdict = f"You lose by ${-diff}"
     context["trade"]["value_summary"] = {
         "you_give_total": give_value,
         "you_receive_total": receive_value,
+        "gap": abs(diff),
+        "gap_pct": round(gap_pct * 100, 1),
         "verdict": verdict,
     }
 
@@ -151,7 +158,7 @@ async def analyze_trade(
                 for p in players
             ]
         }
-        if diff >= EVEN_THRESHOLD:
+        if diff > 0 and gap_pct >= EVEN_GAP_PCT:
             in_trade = set(body.give) | set(body.receive)
             candidates = [
                 (p, values[p.id]["value"])
@@ -165,6 +172,7 @@ async def analyze_trade(
                     name=p.full_name,
                     value=v,
                     ppg=values[p.id].get("ppg"),
+                    trend=values[p.id].get("trend"),
                 )
                 for p, v in candidates[:3]
             ]
@@ -184,6 +192,7 @@ async def analyze_trade(
                 name=name_cache.get(pid, pid),
                 value=values.get(pid, {}).get("value", 0),
                 ppg=values.get(pid, {}).get("ppg"),
+                trend=values.get(pid, {}).get("trend"),
             )
             for pid in [*body.give, *body.receive]
         ],
