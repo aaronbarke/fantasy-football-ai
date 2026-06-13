@@ -10,14 +10,13 @@ import { useRouter } from "next/navigation";
  * redirects to /login (no token) or /connect (no leagues). */
 export function useLeague() {
   const router = useRouter();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Initialize synchronously from localStorage so navigating between tabs keeps
+  // the chosen league instead of snapping back to the first one. (Reading it in
+  // an effect lets the fallback below clobber it before the read lands.)
+  const [selectedId, setSelectedId] = useState<string | null>(() => getSelectedLeague());
 
   useEffect(() => {
-    if (!getToken()) {
-      router.push("/login");
-      return;
-    }
-    setSelectedId(getSelectedLeague());
+    if (!getToken()) router.push("/login");
   }, [router]);
 
   const { data: leagues, isLoading, isFetching } = useQuery({
@@ -32,13 +31,23 @@ export function useLeague() {
       router.push("/connect");
       return;
     }
-    if (!selectedId || !leagues.some((l) => l.id === selectedId)) {
+    // Honor a valid stored selection; only fall back to the first league when
+    // there's genuinely no stored choice (or it points at a league that's gone).
+    // Reading localStorage here — not `selectedId` — avoids clobbering the
+    // selection during the first render after a tab switch.
+    const stored = getSelectedLeague();
+    if (stored && leagues.some((l) => l.id === stored)) {
+      if (selectedId !== stored) setSelectedId(stored);
+    } else {
       setSelectedLeague(leagues[0].id);
       setSelectedId(leagues[0].id);
     }
   }, [leagues, isFetching, selectedId, router]);
 
-  const league = leagues?.find((l) => l.id === selectedId) ?? leagues?.[0] ?? null;
+  const league =
+    (selectedId ? leagues?.find((l) => l.id === selectedId) : undefined) ??
+    leagues?.[0] ??
+    null;
 
   return {
     league,
