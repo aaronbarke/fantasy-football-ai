@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
 
+    # Google sign-in (optional). Set to your Google OAuth Web Client ID to
+    # enable "Continue with Google". No client secret is needed — we verify
+    # the ID token Google hands the browser. Leave blank to disable.
+    google_client_id: str = ""
+
     odds_api_key: str = ""
 
     resend_api_key: str = ""
