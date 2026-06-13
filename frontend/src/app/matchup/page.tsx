@@ -7,6 +7,7 @@ import InjuryBadge from "@/components/InjuryBadge";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import PlayerAvatar from "@/components/PlayerAvatar";
+import { positionColor } from "@/lib/utils";
 import { Sparkles } from "lucide-react";
 
 interface MPlayer {
@@ -52,6 +53,11 @@ function PlayerSide({ p, win, align }: { p: MPlayer | null; win: boolean; align:
   }
   return (
     <div className={`flex flex-1 items-center gap-2.5 ${right ? "flex-row-reverse text-right" : ""}`}>
+      <span
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white ${positionColor(p.position)}`}
+      >
+        {p.position}
+      </span>
       <PlayerAvatar id={p.id} name={p.name} position={p.position} team={p.team} size={36} />
       <div className="min-w-0">
         <div className={`flex items-center gap-1.5 ${right ? "flex-row-reverse" : ""}`}>
