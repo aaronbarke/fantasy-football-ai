@@ -1,10 +1,10 @@
-"""Player trade-value model — a currency-style market value.
+"""Player trade-value model — a single value number per player.
 
-Instead of a flat 0-100 percentile, every player gets a **value** in points
-of currency derived from Value Over Replacement (VOR): how much more they
-produce than a freely-available replacement at their position. VOR makes
-values comparable across positions (an elite TE and an elite WR can be priced
-against each other) and behaves like a market — studs cost a premium.
+Instead of a flat 0-100 percentile, every player gets a **value** derived from
+Value Over Replacement (VOR): how much more they produce than a freely-available
+replacement at their position. VOR makes values comparable across positions (an
+elite TE and an elite WR can be priced against each other) and behaves like a
+market — studs carry a premium.
 
 Two layers feed the value:
 
