@@ -72,7 +72,7 @@ function Stat({
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { league, leagues, selectLeague } = useLeague();
+  const { league } = useLeague();
   const [syncing, setSyncing] = useState(false);
 
   const { data: roster, isLoading: rosterLoading } = useQuery({
@@ -158,29 +158,14 @@ export default function DashboardPage() {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {leagues.length > 1 && (
-              <select
-                value={league?.id}
-                onChange={(e) => selectLeague(e.target.value)}
-                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-              >
-                {leagues.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.league_name ?? l.league_id}
-                  </option>
-                ))}
-              </select>
-            )}
-            <button
-              onClick={syncNow}
-              disabled={syncing}
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
-              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-              Sync
-            </button>
-          </div>
+          <button
+            onClick={syncNow}
+            disabled={syncing}
+            className="flex items-center gap-1.5 self-start rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            Sync
+          </button>
         </div>
 
         {/* ── Metric ribbon: the team's vitals ── */}
