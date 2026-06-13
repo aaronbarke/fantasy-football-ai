@@ -17,9 +17,9 @@ router = APIRouter(prefix="/api/trade", tags=["trade"])
 TRADE_QUESTION = (
     "Evaluate this trade. The user GIVES the players in trade.give and "
     "RECEIVES the players in trade.receive. Each player has a trade_value — a "
-    "currency-style market value from Value Over Replacement (higher = more "
-    "valuable; elite players run 40-70+, startable contributors 15-35, depth "
-    "under 10). Some players also carry a trend (rising/falling) from recent "
+    "single value number from Value Over Replacement (higher = more valuable; "
+    "elite players run 40-70+, startable contributors 15-35, depth under 10). "
+    "Some players also carry a trend (rising/falling) from recent "
     "form. trade.value_summary has each side's total and the gap as a percent "
     "of the larger side — anchor your verdict in those numbers plus the stats.\n\n"
     "Grading rubric (apply strictly, judged by the GAP %):\n"
@@ -122,9 +122,9 @@ async def analyze_trade(
     if gap_pct < EVEN_GAP_PCT:
         verdict = "Roughly even trade"
     elif diff > 0:
-        verdict = f"You win by ${diff}"
+        verdict = f"You win by {diff}"
     else:
-        verdict = f"You lose by ${-diff}"
+        verdict = f"You lose by {-diff}"
     context["trade"]["value_summary"] = {
         "you_give_total": give_value,
         "you_receive_total": receive_value,

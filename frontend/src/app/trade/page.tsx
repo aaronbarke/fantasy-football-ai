@@ -190,8 +190,8 @@ export default function TradePage() {
       <main className="mx-auto max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-bold">Trade analyzer</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Build both sides of a trade and get a graded AI verdict. Values are a
-          market price from Value Over Replacement — updated as the season plays out.
+          Build both sides of a trade and get a graded AI verdict. Each player
+          gets a value score from Value Over Replacement — updated as the season plays out.
         </p>
 
         <div className="mt-6 grid gap-6 md:grid-cols-2">
@@ -235,7 +235,7 @@ export default function TradePage() {
                   <div className="flex items-center justify-between gap-4">
                     <div className="text-center">
                       <p className="text-xs uppercase tracking-wide text-gray-500">You give</p>
-                      <p className="text-3xl font-extrabold tabular-nums">${result.give_value}</p>
+                      <p className="text-3xl font-extrabold tabular-nums">{result.give_value}</p>
                     </div>
                     <div className="flex-1 text-center">
                       <p className={`text-lg font-bold ${verdictColor}`}>{result.verdict}</p>
@@ -251,7 +251,7 @@ export default function TradePage() {
                     </div>
                     <div className="text-center">
                       <p className="text-xs uppercase tracking-wide text-gray-500">You receive</p>
-                      <p className="text-3xl font-extrabold tabular-nums">${result.receive_value}</p>
+                      <p className="text-3xl font-extrabold tabular-nums">{result.receive_value}</p>
                     </div>
                   </div>
                 );
@@ -264,7 +264,7 @@ export default function TradePage() {
                     key={p.id}
                     className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs dark:border-gray-800 dark:bg-gray-900"
                   >
-                    {p.name}: <strong className="tabular-nums">${p.value}</strong>
+                    {p.name}: <strong className="tabular-nums">{p.value}</strong>
                     <TrendArrow trend={p.trend} />
                     {p.ppg != null && <span className="text-gray-400"> · {p.ppg} ppg</span>}
                   </span>
@@ -277,7 +277,7 @@ export default function TradePage() {
                   {result.sweeteners.map((s, i) => (
                     <span key={s.id}>
                       {i > 0 && ", "}
-                      <strong>{s.name}</strong> (${s.value})
+                      <strong>{s.name}</strong> ({s.value})
                     </span>
                   ))}
                 </p>
