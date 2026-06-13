@@ -51,14 +51,18 @@ export default function MatchupPage() {
               team ? (
                 <section
                   key={idx}
-                  className={`rounded-xl border p-5 ${
+                  className={`rounded-2xl border bg-white p-5 ${
                     idx === 0
-                      ? "border-green-300 bg-green-50/40"
-                      : "border-gray-200 bg-white"
+                      ? "border-green-400/60 dark:border-green-500/40"
+                      : "border-gray-200/70 dark:border-gray-800/70"
                   }`}
                 >
                   <div className="flex items-baseline justify-between">
-                    <h2 className="text-lg font-bold">
+                    <h2
+                      className={`text-lg font-bold ${
+                        idx === 0 ? "text-green-700 dark:text-green-400" : ""
+                      }`}
+                    >
                       {idx === 0 ? "You" : team.owner_name ?? "Opponent"}
                     </h2>
                     <span className="text-sm text-gray-500">
