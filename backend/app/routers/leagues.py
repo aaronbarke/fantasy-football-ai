@@ -352,6 +352,20 @@ async def get_matchup(
     )
 
 
+@router.get("/{connection_id}/matchup/preview")
+async def get_matchup_preview(
+    connection_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Head-to-head scouting report: projected totals, win probability, and
+    position-by-position battles. Powered by the projection engine."""
+    from app.services.gameplan_service import build_matchup_preview
+
+    conn = await _get_user_connection(db, user, connection_id)
+    return await build_matchup_preview(db, conn)
+
+
 @router.get("/{connection_id}/schedule-strength")
 async def schedule_strength(
     connection_id: str,

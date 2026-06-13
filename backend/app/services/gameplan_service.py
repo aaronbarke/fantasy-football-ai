@@ -106,6 +106,95 @@ def _team_totals(lineup: list[dict], projections: dict[str, dict]) -> tuple[floa
     return total, variance
 
 
+async def _optimal_for_roster(
+    db: AsyncSession, conn: LeagueConnection, slots: list[str], roster: Roster
+) -> tuple[list[dict], float, float]:
+    """Optimal skill-position lineup + (total, variance) for one roster."""
+    proj = await compute_projections(db, list(roster.players), conn.season)
+    cards = await _player_cards(db, list(roster.players), proj)
+    lineup, _ = optimize_lineup(slots, [c for c in cards if c["projected"] is not None])
+    total, variance = _team_totals(lineup, proj)
+    return lineup, total, variance
+
+
+async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dict:
+    """Head-to-head scouting report: both lineups' projections aligned slot by
+    slot, projected team totals, and win probability. Uses the same projection
+    engine as the Game Plan so the numbers stay consistent across pages."""
+    if not conn.team_id:
+        return {"status": "no_team"}
+
+    matchups = (
+        await db.execute(
+            select(Matchup)
+            .where(Matchup.connection_id == conn.id)
+            .order_by(Matchup.week.desc())
+        )
+    ).scalars().all()
+    m = next((x for x in matchups if conn.team_id in (x.team_a_id, x.team_b_id)), None)
+    if m is None:
+        return {"status": "no_matchup"}
+
+    async def _roster(team_id: str | None) -> Roster | None:
+        if not team_id:
+            return None
+        return (
+            await db.execute(
+                select(Roster).where(
+                    Roster.connection_id == conn.id, Roster.team_id == team_id
+                )
+            )
+        ).scalar_one_or_none()
+
+    opp_id = m.team_b_id if m.team_a_id == conn.team_id else m.team_a_id
+    user_roster = await _roster(conn.team_id)
+    opp_roster = await _roster(opp_id)
+    if not (user_roster and user_roster.players and opp_roster and opp_roster.players):
+        return {"status": "no_rosters"}
+
+    slots = _lineup_slots(conn)
+    user_lineup, user_total, user_var = await _optimal_for_roster(
+        db, conn, slots, user_roster
+    )
+    opp_lineup, opp_total, opp_var = await _optimal_for_roster(
+        db, conn, slots, opp_roster
+    )
+
+    # Both lineups are built from the same slot list, so they align index-for-index
+    rows = []
+    for i in range(max(len(user_lineup), len(opp_lineup))):
+        u = user_lineup[i] if i < len(user_lineup) else None
+        o = opp_lineup[i] if i < len(opp_lineup) else None
+        rows.append(
+            {
+                "slot": (u or o)["slot"],
+                "user": u["player"] if u else None,
+                "opponent": o["player"] if o else None,
+            }
+        )
+
+    return {
+        "status": "ok",
+        "week": m.week,
+        "win_probability": round(
+            win_probability(user_total, user_var, opp_total, opp_var), 3
+        ),
+        "user": {
+            "team_id": user_roster.team_id,
+            "owner_name": user_roster.owner_name,
+            "record": f"{user_roster.wins}-{user_roster.losses}",
+            "projected_total": round(user_total, 1),
+        },
+        "opponent": {
+            "team_id": opp_roster.team_id,
+            "owner_name": opp_roster.owner_name,
+            "record": f"{opp_roster.wins}-{opp_roster.losses}",
+            "projected_total": round(opp_total, 1),
+        },
+        "rows": rows,
+    }
+
+
 async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:
     roster = (
         await db.execute(
