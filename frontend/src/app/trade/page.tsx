@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import type { PlayerCard } from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
 import { positionColor } from "@/lib/utils";
-import { ArrowLeftRight, Search, X } from "lucide-react";
+import { ArrowLeftRight, Search, TrendingDown, TrendingUp, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -132,6 +132,15 @@ interface TradePlayerValue {
   name: string;
   value: number;
   ppg: number | null;
+  trend?: string | null;
+}
+
+function TrendArrow({ trend }: { trend?: string | null }) {
+  if (trend === "rising")
+    return <TrendingUp className="inline h-3 w-3 text-green-500" aria-label="rising" />;
+  if (trend === "falling")
+    return <TrendingDown className="inline h-3 w-3 text-red-500" aria-label="falling" />;
+  return null;
 }
 
 interface TradeResult {
@@ -181,7 +190,8 @@ export default function TradePage() {
       <main className="mx-auto max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-bold">Trade analyzer</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Build both sides of a trade and get a graded AI verdict.
+          Build both sides of a trade and get a graded AI verdict. Values are a
+          market price from Value Over Replacement — updated as the season plays out.
         </p>
 
         <div className="mt-6 grid gap-6 md:grid-cols-2">
@@ -210,48 +220,52 @@ export default function TradePage() {
         {result && (
           <div className="mt-8 space-y-4">
             {/* Trade score */}
-            <div className="rounded-xl border border-gray-200 bg-white p-6">
-              <div className="flex items-center justify-between gap-4">
-                <div className="text-center">
-                  <p className="text-xs uppercase tracking-wide text-gray-500">You give</p>
-                  <p className="text-3xl font-bold">{result.give_value}</p>
-                </div>
-                <div className="flex-1 text-center">
-                  <p
-                    className={`text-lg font-bold ${
-                      result.receive_value - result.give_value >= 8
-                        ? "text-green-600"
-                        : result.give_value - result.receive_value >= 8
-                          ? "text-red-600"
-                          : "text-gray-700"
-                    }`}
-                  >
-                    {result.verdict}
-                  </p>
-                  <div className="mx-auto mt-2 flex h-2 max-w-xs overflow-hidden rounded-full bg-gray-100">
-                    <div
-                      className="bg-red-400"
-                      style={{
-                        width: `${(result.give_value / Math.max(result.give_value + result.receive_value, 1)) * 100}%`,
-                      }}
-                    />
-                    <div className="flex-1 bg-green-500" />
+            <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800">
+              {(() => {
+                const diff = result.receive_value - result.give_value;
+                const bigger = Math.max(result.give_value, result.receive_value, 1);
+                const meaningful = Math.abs(diff) / bigger >= 0.08;
+                const verdictColor =
+                  meaningful && diff > 0
+                    ? "text-green-600 dark:text-green-400"
+                    : meaningful && diff < 0
+                      ? "text-red-600 dark:text-red-400"
+                      : "text-gray-700 dark:text-gray-300";
+                return (
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="text-center">
+                      <p className="text-xs uppercase tracking-wide text-gray-500">You give</p>
+                      <p className="text-3xl font-extrabold tabular-nums">${result.give_value}</p>
+                    </div>
+                    <div className="flex-1 text-center">
+                      <p className={`text-lg font-bold ${verdictColor}`}>{result.verdict}</p>
+                      <div className="mx-auto mt-2 flex h-2 max-w-xs overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+                        <div
+                          className="bg-red-400"
+                          style={{
+                            width: `${(result.give_value / Math.max(result.give_value + result.receive_value, 1)) * 100}%`,
+                          }}
+                        />
+                        <div className="flex-1 bg-green-500" />
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs uppercase tracking-wide text-gray-500">You receive</p>
+                      <p className="text-3xl font-extrabold tabular-nums">${result.receive_value}</p>
+                    </div>
                   </div>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs uppercase tracking-wide text-gray-500">You receive</p>
-                  <p className="text-3xl font-bold">{result.receive_value}</p>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Per-player values */}
               <div className="mt-4 flex flex-wrap justify-center gap-2">
                 {result.player_values.map((p) => (
                   <span
                     key={p.id}
-                    className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs"
+                    className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs dark:border-gray-800 dark:bg-gray-900"
                   >
-                    {p.name}: <strong>{p.value}</strong>
+                    {p.name}: <strong className="tabular-nums">${p.value}</strong>
+                    <TrendArrow trend={p.trend} />
                     {p.ppg != null && <span className="text-gray-400"> · {p.ppg} ppg</span>}
                   </span>
                 ))}
@@ -263,7 +277,7 @@ export default function TradePage() {
                   {result.sweeteners.map((s, i) => (
                     <span key={s.id}>
                       {i > 0 && ", "}
-                      <strong>{s.name}</strong> ({s.value})
+                      <strong>{s.name}</strong> (${s.value})
                     </span>
                   ))}
                 </p>
