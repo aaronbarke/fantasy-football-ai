@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
@@ -42,10 +43,14 @@ function cellColor(rank: number | null): string {
 export default function SchedulePage() {
   const { league } = useLeague();
   const router = useRouter();
+  const [window, setWindow] = useState<"upcoming" | "playoffs">("upcoming");
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["schedule-strength", league?.id],
-    queryFn: () => api<StrengthData>(`/api/leagues/${league!.id}/schedule-strength`),
+    queryKey: ["schedule-strength", league?.id, window],
+    queryFn: () =>
+      api<StrengthData>(
+        `/api/leagues/${league!.id}/schedule-strength?window=${window}`
+      ),
     enabled: !!league,
     retry: false,
     staleTime: 30 * 60_000,
@@ -57,10 +62,29 @@ export default function SchedulePage() {
       <main className="mx-auto max-w-6xl px-4 py-8">
         <h1 className="text-2xl font-bold">Schedule strength</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Upcoming matchup difficulty for your roster. Green = the opponent
-          allows a lot of fantasy points to that position; red = tough matchup.
+          Matchup difficulty for your roster. Green = the opponent allows a lot
+          of fantasy points to that position; red = tough matchup.
           {data ? ` Based on ${data.stats_season} defensive stats.` : ""}
         </p>
+
+        <div className="mt-4 inline-flex rounded-lg border border-gray-200 p-0.5 dark:border-gray-800">
+          {([
+            ["upcoming", "Upcoming"],
+            ["playoffs", "Fantasy playoffs (Wk 15–17)"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setWindow(key)}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                window === key
+                  ? "bg-green-600 text-white"
+                  : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         {isLoading && <p className="mt-6 text-sm text-gray-400">Crunching the schedule…</p>}
         {error ? (

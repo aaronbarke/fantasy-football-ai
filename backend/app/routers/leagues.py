@@ -366,13 +366,24 @@ async def get_matchup_preview(
     return await build_matchup_preview(db, conn)
 
 
+# Fantasy playoffs are the NFL's weeks 15-17 in most leagues.
+FANTASY_PLAYOFF_START = 15
+FANTASY_PLAYOFF_WEEKS = 3
+
+
 @router.get("/{connection_id}/schedule-strength")
 async def schedule_strength(
     connection_id: str,
+    window: str = "upcoming",
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Heatmap of upcoming matchup difficulty for the user's roster."""
+    """Heatmap of matchup difficulty for the user's roster.
+
+    window="upcoming" (default) shows the next several weeks from the current
+    week; window="playoffs" shows the fantasy playoff weeks (NFL 15-17) so you
+    can scout postseason matchups ahead of time.
+    """
     from app.services.schedule_service import build_schedule_strength
     from app.services.sleeper_service import SleeperClient
 
@@ -386,6 +397,15 @@ async def schedule_strength(
     ).scalar_one_or_none()
     if roster is None or not roster.players:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No roster — sync the league first")
+
+    if window == "playoffs":
+        return await build_schedule_strength(
+            db,
+            conn.season,
+            FANTASY_PLAYOFF_START,
+            list(roster.players),
+            weeks_ahead=FANTASY_PLAYOFF_WEEKS,
+        )
 
     week = 1
     try:
