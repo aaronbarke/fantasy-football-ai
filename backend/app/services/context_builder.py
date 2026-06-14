@@ -219,6 +219,7 @@ async def player_package(
         "name": player.full_name,
         "team": player.team,
         "position": player.position,
+        "years_exp": player.years_exp,
         "injury_status": player.injury_status or "Healthy",
         "injury_body_part": player.injury_body_part,
         "stats_season": stats_season,
@@ -253,6 +254,7 @@ async def _roster_names(
             "name": p.full_name,
             "position": p.position,
             "team": p.team,
+            "years_exp": p.years_exp,
             "injury_status": p.injury_status or "Healthy",
         }
 
