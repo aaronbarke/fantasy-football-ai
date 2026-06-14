@@ -23,6 +23,10 @@ FLEX_ELIGIBLE = {
 }
 DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX"]
 
+# Only surface a start/sit swap when the projected gain clears this — otherwise
+# it's noise and the optimizer cries wolf over a fraction of a point.
+SWAP_MIN_GAIN = 1.5
+
 
 def _lineup_slots(conn: LeagueConnection) -> list[str]:
     slots = [
@@ -233,7 +237,14 @@ async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:
                     ),
                     None,
                 )
-                swaps.append({"start": p, "sit": displaced, "slot": s["slot"]})
+                # Skip trivial swaps: a sub-1.5pt edge over the current starter
+                # isn't worth flagging. (Filling an empty slot always counts.)
+                gain = None
+                if displaced is not None:
+                    gain = round((p.get("projected") or 0) - (displaced.get("projected") or 0), 1)
+                    if gain < SWAP_MIN_GAIN:
+                        continue
+                swaps.append({"start": p, "sit": displaced, "slot": s["slot"], "gain": gain})
 
     my_total, my_var = _team_totals(lineup, projections)
 
