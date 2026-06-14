@@ -59,6 +59,19 @@ GAMMA = 1.0
 # Deeper than "last starter" so above-average players keep meaningful value.
 REPLACEMENT_RANK = {"QB": 18, "RB": 40, "WR": 50, "TE": 16}
 
+# Soft cap: production above a position's elite anchor is an outlier season and
+# gets compressed, so a historic WR1 sits a tier above the WR2 — not double it.
+# Only affects the extreme top of each position; everything else is untouched.
+ELITE_PPG = {"QB": 22.0, "RB": 21.0, "WR": 19.0, "TE": 14.5}
+EXCESS_COMPRESS = 0.5
+
+
+def _soft_cap(value_ppg: float, position: str) -> float:
+    anchor = ELITE_PPG.get(position, 18.0)
+    if value_ppg > anchor:
+        return anchor + (value_ppg - anchor) * EXCESS_COMPRESS
+    return value_ppg
+
 
 def _blended_base(samples: list[tuple[int, int, float]], latest_season: int, recent_cutoff: int) -> float:
     """Recency-weighted ppg from (season, week, points) samples."""
@@ -200,8 +213,11 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
         delta = c["adj"] - c["base"]
         trend = "rising" if delta >= 1 else "falling" if delta <= -1 else "steady"
         # Value can't drop below the proven floor even in a slump; a hot streak
-        # (adj above base) still lifts it.
-        value_ppg = max(c["adj"], PEAK_FLOOR * c["peak"])
+        # (adj above base) still lifts it. Outlier production is soft-capped so
+        # the very top of a position doesn't run away from the next tier.
+        value_ppg = _soft_cap(
+            max(c["adj"], PEAK_FLOOR * c["peak"]), c["position"]
+        )
         values[pid] = {
             "value": _value_from_vor(value_ppg, repl),
             "ppg": round(c["adj"], 1),
