@@ -31,7 +31,14 @@ interface GamePlan {
   projected_total?: number;
   lineup?: { slot: string; player: PlanPlayer | null }[];
   bench?: PlanPlayer[];
-  swaps?: { start: PlanPlayer; sit: PlanPlayer | null; slot: string }[];
+  swaps?: {
+    start: PlanPlayer;
+    sit: PlanPlayer | null;
+    slot: string;
+    gain?: number | null;
+    close?: boolean;
+    reason?: string | null;
+  }[];
   opponent?: {
     name: string | null;
     projected_total: number;
@@ -257,6 +264,11 @@ export default function GamePlanPage() {
                         </>
                       )}{" "}
                       at {s.slot}
+                      {s.close && (
+                        <span className="ml-1 text-xs font-medium text-amber-700/80 dark:text-amber-200/70">
+                          — narrow{s.reason ? `, edge: ${s.reason}` : " call"}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>

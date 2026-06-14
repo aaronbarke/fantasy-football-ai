@@ -23,6 +23,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import GameCondition, NflSchedule, Player, PlayerStatsWeekly
+from app.services.external_proj_service import get_external_projections
 from app.services.schedule_service import defense_vs_position_ranks
 
 PRIOR_SEASON_WEIGHT = 0.5
@@ -32,6 +33,35 @@ LEAGUE_AVG_TEAM_TOTAL = 22.5
 VEGAS_PCT_PER_POINT = 0.02  # ±2% projection per implied point above/below avg
 VEGAS_ADJ_CAP = 0.15
 PROJECTABLE = {"QB", "RB", "WR", "TE"}
+
+# Blend weight on Sleeper's weekly projection when available (rest = our model)
+EXTERNAL_WEIGHT = 0.5
+# Weather: only matters outdoors; small, position-aware nudges that decide
+# otherwise-close calls (wind hurts passing, rain hurts catching).
+WEATHER_WIND_FLOOR = 12  # mph
+WEATHER_ADJ_CAP = 0.12
+
+
+def _weather_adjust(position: str | None, base: float, gc: GameCondition | None) -> float:
+    """Points adjustment from game-day weather (0 indoors / unknown)."""
+    if gc is None or getattr(gc, "dome", False):
+        return 0.0
+    pct = 0.0
+    wind = float(gc.wind_mph or 0)
+    precip = float(gc.precipitation_pct or 0)
+    if wind > WEATHER_WIND_FLOOR:
+        over = wind - WEATHER_WIND_FLOOR
+        if position in ("QB", "WR", "TE"):
+            pct -= min(0.10, over * 0.012)  # passing game suffers
+        elif position == "RB":
+            pct += min(0.03, over * 0.004)  # script tilts to the run
+    if precip >= 50:
+        if position in ("QB", "WR", "TE"):
+            pct -= 0.04
+        elif position == "RB":
+            pct += 0.02
+    pct = max(-WEATHER_ADJ_CAP, min(0.05, pct))
+    return base * pct
 
 
 def _erf(x: float) -> float:
@@ -146,13 +176,24 @@ async def compute_projections(
             )
         ).scalars().all()
         implied: dict[str, float] = {}
+        gc_by_team_week: dict[tuple[str, int], GameCondition] = {}
         for gc in conditions:
             if gc.implied_total_home is not None:
                 implied[gc.home_team] = float(gc.implied_total_home)
             if gc.implied_total_away is not None:
                 implied[gc.away_team] = float(gc.implied_total_away)
+            gc_by_team_week[(gc.home_team, gc.week)] = gc
+            gc_by_team_week[(gc.away_team, gc.week)] = gc
     else:
         implied = {}
+        gc_by_team_week = {}
+
+    # Sleeper weekly projections for the upcoming slate, to blend with our model
+    upcoming_weeks = [g["week"] for g in next_opponent.values()]
+    target_week = min(upcoming_weeks) if upcoming_weeks else None
+    external = (
+        await get_external_projections(season, target_week) if target_week else {}
+    )
 
     out: dict[str, dict] = {}
     for p in players:
@@ -183,7 +224,19 @@ async def compute_projections(
             pct = max(-VEGAS_ADJ_CAP, min(VEGAS_ADJ_CAP, pct))
             vegas_adj = base * pct
 
-        projected = max(0.0, base + matchup_adj + vegas_adj)
+        weather_adj = 0.0
+        if game:
+            weather_adj = _weather_adjust(
+                p.position, base, gc_by_team_week.get((p.team, game["week"]))
+            )
+
+        model_proj = base + matchup_adj + vegas_adj + weather_adj
+        ext = external.get(p.id)
+        if ext is not None:
+            # Blend our model with Sleeper's weekly projection
+            projected = max(0.0, EXTERNAL_WEIGHT * ext + (1 - EXTERNAL_WEIGHT) * model_proj)
+        else:
+            projected = max(0.0, model_proj)
         games_played = len(samples)
         cv = sigma / base if base > 0 else 1.0
         confidence = (
@@ -202,6 +255,8 @@ async def compute_projections(
                 "base_ppg": round(base, 1),
                 "matchup_adj": round(matchup_adj, 1),
                 "vegas_adj": round(vegas_adj, 1),
+                "weather_adj": round(weather_adj, 1),
+                "external_proj": round(ext, 1) if ext is not None else None,
                 "opponent": opponent,
                 "week": game["week"] if game else None,
                 "home": game["home"] if game else None,

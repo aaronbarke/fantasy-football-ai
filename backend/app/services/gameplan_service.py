@@ -23,9 +23,24 @@ FLEX_ELIGIBLE = {
 }
 DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX"]
 
-# Only surface a start/sit swap when the projected gain clears this — otherwise
-# it's noise and the optimizer cries wolf over a fraction of a point.
-SWAP_MIN_GAIN = 1.5
+# A start/sit closer than this is a near-toss-up — we still recommend the higher
+# projection, but flag it as close and surface the deciding contextual factor
+# (weather, game total, matchup) baked into the projection.
+CLOSE_MARGIN = 1.0
+
+
+def _edge_reason(start: dict, sit: dict) -> str | None:
+    """For a close call, the contextual factor most favoring the start."""
+    best, best_delta = None, 0.1
+    for key, label in (
+        ("weather_adj", "weather"),
+        ("vegas_adj", "higher team total"),
+        ("matchup_adj", "softer matchup"),
+    ):
+        delta = (start.get(key) or 0) - (sit.get(key) or 0)
+        if delta > best_delta:
+            best, best_delta = label, delta
+    return best
 
 
 def _lineup_slots(conn: LeagueConnection) -> list[str]:
@@ -93,6 +108,8 @@ async def _player_cards(
                 "opponent": (proj.get("components") or {}).get("opponent"),
                 "matchup_adj": (proj.get("components") or {}).get("matchup_adj"),
                 "vegas_adj": (proj.get("components") or {}).get("vegas_adj"),
+                "weather_adj": (proj.get("components") or {}).get("weather_adj"),
+                "external_proj": (proj.get("components") or {}).get("external_proj"),
             }
         )
     return cards
@@ -237,14 +254,26 @@ async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:
                     ),
                     None,
                 )
-                # Skip trivial swaps: a sub-1.5pt edge over the current starter
-                # isn't worth flagging. (Filling an empty slot always counts.)
+                # Recommend the higher projection even by a hair; for near
+                # toss-ups flag it close and name the contextual tiebreaker.
                 gain = None
+                close = False
+                reason = None
                 if displaced is not None:
                     gain = round((p.get("projected") or 0) - (displaced.get("projected") or 0), 1)
-                    if gain < SWAP_MIN_GAIN:
-                        continue
-                swaps.append({"start": p, "sit": displaced, "slot": s["slot"], "gain": gain})
+                    close = gain < CLOSE_MARGIN
+                    if close:
+                        reason = _edge_reason(p, displaced)
+                swaps.append(
+                    {
+                        "start": p,
+                        "sit": displaced,
+                        "slot": s["slot"],
+                        "gain": gain,
+                        "close": close,
+                        "reason": reason,
+                    }
+                )
 
     my_total, my_var = _team_totals(lineup, projections)
 
