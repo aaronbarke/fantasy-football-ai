@@ -17,6 +17,7 @@ class Player(Base):
     position: Mapped[str | None] = mapped_column(String(10), index=True)
     team: Mapped[str | None] = mapped_column(String(5), index=True)
     age: Mapped[int | None] = mapped_column(Integer)
+    years_exp: Mapped[int | None] = mapped_column(Integer)  # 0 = rookie
     status: Mapped[str | None] = mapped_column(String(50))
     espn_id: Mapped[str | None] = mapped_column(String(50), index=True)
     yahoo_id: Mapped[str | None] = mapped_column(String(50))

@@ -46,6 +46,7 @@ async def sync_player_pool(db: AsyncSession) -> int:
         player.position = position
         player.team = p.get("team")
         player.age = p.get("age")
+        player.years_exp = p.get("years_exp")
         player.status = p.get("status")
         player.injury_status = p.get("injury_status") or player.injury_status
         player.injury_body_part = p.get("injury_body_part") or player.injury_body_part
