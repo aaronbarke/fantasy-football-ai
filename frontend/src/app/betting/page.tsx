@@ -28,6 +28,18 @@ interface PointSummary {
   books: number;
 }
 
+interface ArbLeg {
+  team: string;
+  book: string;
+  price: number;
+  stake_pct: number;
+}
+interface Arbitrage {
+  profit_pct: number;
+  home: ArbLeg;
+  away: ArbLeg;
+}
+
 interface BoardGame {
   home_team: string;
   away_team: string;
@@ -36,6 +48,7 @@ interface BoardGame {
   spread: Record<string, PointSummary | null>;
   total: { over: PointSummary | null; under: PointSummary | null };
   edge_score: number;
+  arbitrage: Arbitrage | null;
 }
 
 function fmtPrice(p: number): string {
@@ -84,8 +97,9 @@ export default function BettingPage() {
           <div>
             <h1 className="text-2xl font-bold">Betting edge</h1>
             <p className="mt-1 text-sm text-gray-500">
-              Live lines across US sportsbooks — best price highlighted, games
-              sorted by how much the books disagree (line-shopping value).
+              Live lines across regulated US sportsbooks — best price highlighted,
+              guaranteed-profit arbitrage flagged, then sorted by how much the
+              books disagree (line-shopping value).
             </p>
           </div>
           <button
@@ -121,7 +135,11 @@ export default function BettingPage() {
           {games.map((g) => (
             <div
               key={`${g.away_team}@${g.home_team}`}
-              className="rounded-xl border border-gray-200 bg-white p-5"
+              className={`rounded-xl border bg-white p-5 ${
+                g.arbitrage
+                  ? "border-green-400 dark:border-green-500/40"
+                  : "border-gray-200 dark:border-gray-800"
+              }`}
             >
               <div className="flex items-center justify-between">
                 <p className="font-bold">
@@ -138,12 +156,31 @@ export default function BettingPage() {
                       : ""}
                   </span>
                 </p>
-                {g.edge_score >= 20 && (
-                  <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
-                    High shop value
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {g.arbitrage && (
+                    <span className="rounded-full bg-green-600 px-2.5 py-0.5 text-xs font-bold text-white">
+                      ARB +{g.arbitrage.profit_pct}%
+                    </span>
+                  )}
+                  {g.edge_score >= 20 && (
+                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+                      High shop value
+                    </span>
+                  )}
+                </div>
               </div>
+
+              {g.arbitrage && (
+                <div className="mt-2 rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-xs text-green-800 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-300">
+                  <span className="font-semibold">
+                    Guaranteed +{g.arbitrage.profit_pct}% return:
+                  </span>{" "}
+                  stake {g.arbitrage.home.stake_pct}% on {g.arbitrage.home.team}{" "}
+                  ({fmtPrice(g.arbitrage.home.price)}) @ {g.arbitrage.home.book}, and{" "}
+                  {g.arbitrage.away.stake_pct}% on {g.arbitrage.away.team}{" "}
+                  ({fmtPrice(g.arbitrage.away.price)}) @ {g.arbitrage.away.book}.
+                </div>
+              )}
 
               <div className="mt-3 grid gap-4 text-sm sm:grid-cols-3">
                 <div>
