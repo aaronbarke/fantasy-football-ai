@@ -49,15 +49,15 @@ class TradeRequest(BaseModel):
 class TradePlayerValue(BaseModel):
     id: str
     name: str
-    value: int
+    value: float
     ppg: float | None = None
     trend: str | None = None
 
 
 class TradeResponse(BaseModel):
     analysis: str
-    give_value: int
-    receive_value: int
+    give_value: float
+    receive_value: float
     verdict: str
     player_values: list[TradePlayerValue]
     sweeteners: list[TradePlayerValue]
@@ -122,9 +122,9 @@ async def analyze_trade(
     if gap_pct < EVEN_GAP_PCT:
         verdict = "Roughly even trade"
     elif diff > 0:
-        verdict = f"You win by {diff}"
+        verdict = f"You win by {diff:.1f}"
     else:
-        verdict = f"You lose by {-diff}"
+        verdict = f"You lose by {-diff:.1f}"
     context["trade"]["value_summary"] = {
         "you_give_total": give_value,
         "you_receive_total": receive_value,
