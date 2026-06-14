@@ -126,9 +126,9 @@ def _momentum_adjust(base: float, recent_points: list[float]) -> float:
     return max(0.0, base + adj)
 
 
-def _value_from_vor(adj_ppg: float, replacement: float) -> int:
+def _value_from_vor(adj_ppg: float, replacement: float) -> float:
     vor = max(0.0, adj_ppg - replacement)
-    return round(ROSTER_FLOOR + SCALE * (vor**GAMMA))
+    return round(ROSTER_FLOOR + SCALE * (vor**GAMMA), 1)
 
 
 async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
@@ -233,6 +233,6 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
     return values
 
 
-def side_total(values: dict[str, dict], player_ids: list[str]) -> int:
-    """Sum of currency values for one side of a trade; unknowns count 0."""
-    return sum(values.get(pid, {}).get("value", 0) for pid in player_ids)
+def side_total(values: dict[str, dict], player_ids: list[str]) -> float:
+    """Sum of values for one side of a trade; unknowns count 0."""
+    return round(sum(values.get(pid, {}).get("value", 0) for pid in player_ids), 1)
