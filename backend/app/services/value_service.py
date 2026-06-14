@@ -50,9 +50,11 @@ RECENT_GAMES = 5           # games of recent form considered for momentum
 RECENT_WEIGHTS = [1.0, 0.8, 0.6, 0.45, 0.35]  # most-recent game first
 RESPONSIVENESS = 0.6       # global scalar on how much momentum moves the baseline
 
-# Value curve (VOR -> value). Linear with a deep replacement keeps the spread
-# realistic — the WR1 is worth a few times a solid starter, not 8x.
-SCALE = 4.5
+# Value curve: ROSTER_FLOOR + SCALE * VOR^GAMMA. The floor gives every
+# rosterable player a baseline (you can't acquire a real contributor for
+# nothing), so flex types sit above zero; SCALE/GAMMA shape the climb.
+ROSTER_FLOOR = 6
+SCALE = 4.2
 GAMMA = 1.0
 
 # Replacement-level ranks per position (~last rostered in a 12-team league).
@@ -126,7 +128,7 @@ def _momentum_adjust(base: float, recent_points: list[float]) -> float:
 
 def _value_from_vor(adj_ppg: float, replacement: float) -> int:
     vor = max(0.0, adj_ppg - replacement)
-    return max(1, round(SCALE * (vor**GAMMA)))
+    return round(ROSTER_FLOOR + SCALE * (vor**GAMMA))
 
 
 async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
