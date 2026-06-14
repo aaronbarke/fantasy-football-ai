@@ -127,21 +127,63 @@ def _team_totals(lineup: list[dict], projections: dict[str, dict]) -> tuple[floa
     return total, variance
 
 
-async def _optimal_for_roster(
-    db: AsyncSession, conn: LeagueConnection, slots: list[str], roster: Roster
+def _all_lineup_slots(conn: LeagueConnection) -> list[str]:
+    """The league's full starting lineup in order, including K/DEF (normalized)."""
+    raw = [s.upper() for s in (conn.roster_positions or []) if s and s.upper() not in NON_LINEUP]
+    slots = ["DEF" if s in {"D/ST", "DST"} else s for s in raw]
+    return slots or [*DEFAULT_LINEUP, "K", "DEF"]
+
+
+def _display_lineup(all_slots: list[str], cards: list[dict]) -> list[dict]:
+    """Fill the league's full lineup: skill slots by best projection, K/DEF from
+    the roster (no projection). Returns [{slot, player}] in lineup order."""
+    from collections import defaultdict, deque
+
+    skill_slots = [s for s in all_slots if s not in {"K", "DEF"}]
+    projectable = [c for c in cards if c.get("projected") is not None]
+    skill_lineup, _ = optimize_lineup(skill_slots, projectable)
+
+    by_type: dict[str, deque] = defaultdict(deque)
+    for entry in skill_lineup:
+        by_type[entry["slot"]].append(entry["player"])
+
+    pools: dict[str, deque] = defaultdict(deque)
+    for c in cards:
+        pos = (c.get("position") or "").upper()
+        if pos == "K":
+            pools["K"].append(c)
+        elif pos in {"DEF", "DST", "D/ST"}:
+            pools["DEF"].append(c)
+
+    rows = []
+    for s in all_slots:
+        pool = pools[s] if s in {"K", "DEF"} else by_type[s]
+        rows.append({"slot": s, "player": pool.popleft() if pool else None})
+    return rows
+
+
+async def _matchup_team(
+    db: AsyncSession, conn: LeagueConnection, all_slots: list[str], roster: Roster
 ) -> tuple[list[dict], float, float]:
-    """Optimal skill-position lineup + (total, variance) for one roster."""
+    """Full display lineup + (projected total, variance) for one roster. K/DEF
+    are shown but don't have projections, so they don't move the total."""
     proj = await compute_projections(db, list(roster.players), conn.season)
     cards = await _player_cards(db, list(roster.players), proj)
-    lineup, _ = optimize_lineup(slots, [c for c in cards if c["projected"] is not None])
-    total, variance = _team_totals(lineup, proj)
-    return lineup, total, variance
+    rows = _display_lineup(all_slots, cards)
+    total = variance = 0.0
+    for r in rows:
+        p = r["player"]
+        if p and p.get("projected") is not None:
+            total += p["projected"]
+            sigma = (proj.get(p["id"]) or {}).get("stdev") or 0.0
+            variance += sigma**2
+    return rows, total, variance
 
 
 async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dict:
-    """Head-to-head scouting report: both lineups' projections aligned slot by
-    slot, projected team totals, and win probability. Uses the same projection
-    engine as the Game Plan so the numbers stay consistent across pages."""
+    """Head-to-head scouting report: both lineups aligned slot by slot (the
+    league's real lineup, K/DEF included), projected totals, and win
+    probability. Uses the same projection engine as the Game Plan."""
     if not conn.team_id:
         return {"status": "no_team"}
 
@@ -173,12 +215,12 @@ async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dic
     if not (user_roster and user_roster.players and opp_roster and opp_roster.players):
         return {"status": "no_rosters"}
 
-    slots = _lineup_slots(conn)
-    user_lineup, user_total, user_var = await _optimal_for_roster(
-        db, conn, slots, user_roster
+    all_slots = _all_lineup_slots(conn)
+    user_lineup, user_total, user_var = await _matchup_team(
+        db, conn, all_slots, user_roster
     )
-    opp_lineup, opp_total, opp_var = await _optimal_for_roster(
-        db, conn, slots, opp_roster
+    opp_lineup, opp_total, opp_var = await _matchup_team(
+        db, conn, all_slots, opp_roster
     )
 
     # Both lineups are built from the same slot list, so they align index-for-index
