@@ -60,6 +60,9 @@ def decode_token(token: str, expected_type: str = "access") -> str:
     return payload["sub"]
 
 
+DEMO_EMAIL = "demo@ffai.app"
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
@@ -71,4 +74,27 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    return user
+
+
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    """Admin-only endpoints: must match a configured admin email. With none
+    configured, allowed in development but blocked in production."""
+    settings = get_settings()
+    admins = settings.admin_email_list
+    if admins:
+        if user.email.lower() not in admins:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin only")
+    elif settings.is_production:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin endpoints are disabled")
+    return user
+
+
+async def block_demo(user: User = Depends(get_current_user)) -> User:
+    """Disallow state-changing/costly actions on the shared demo account."""
+    if user.email.lower() == DEMO_EMAIL:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This action is disabled on the shared demo account.",
+        )
     return user

@@ -28,7 +28,7 @@ from app.schemas.league import (
 from app.services.sleeper_service import SleeperClient
 from app.services.sync_service import sync_league
 from app.utils.fantasy_math import scoring_type_from_settings
-from app.utils.security import get_current_user
+from app.utils.security import block_demo, get_current_user
 
 router = APIRouter(prefix="/api/leagues", tags=["leagues"])
 
@@ -169,7 +169,7 @@ async def list_leagues(
 async def claim_team(
     connection_id: str,
     body: dict,
-    user: User = Depends(get_current_user),
+    user: User = Depends(block_demo),
     db: AsyncSession = Depends(get_db),
 ):
     """Set which team in the league belongs to this user (for platforms
@@ -195,7 +195,7 @@ async def claim_team(
 @router.post("/{connection_id}/sync", response_model=LeagueConnectionResponse)
 async def trigger_sync(
     connection_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(block_demo),
     db: AsyncSession = Depends(get_db),
 ):
     conn = await _get_user_connection(db, user, connection_id)
