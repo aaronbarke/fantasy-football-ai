@@ -1,4 +1,5 @@
 import uuid
+from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -30,7 +31,9 @@ TRADE_QUESTION = (
     "should propose a specific counter using trade.sweetener_candidates.\n"
     "- Positional scarcity is already priced into the values (VOR), so trust the "
     "totals; still flag when a trade guts a roster's last startable depth at a "
-    "position, and weigh a rising/falling trend when the call is close.\n\n"
+    "position, and weigh a rising/falling trend when the call is close. "
+    "trade.roster_fit gives the user's count at each involved position before "
+    "vs after — call out if the deal leaves them thin or fills a real need.\n\n"
     "Structure: bold one-line verdict first, then a Side Grades section, then "
     "roster-fit analysis, then a clear ACCEPT / REJECT / COUNTER call with "
     "confidence. If countering, name the exact players to add."
@@ -165,6 +168,26 @@ async def analyze_trade(
                 for p in players
             ]
         }
+
+        # Positional depth before vs after the trade, so the AI can judge fit
+        # (does this thin a position or fill a need?).
+        valued_pos = {"QB", "RB", "WR", "TE"}
+        before = Counter(p.position for p in players if p.position in valued_pos)
+        given = Counter(
+            values.get(pid, {}).get("position") for pid in body.give
+        )
+        received = Counter(
+            values.get(pid, {}).get("position") for pid in body.receive
+        )
+        touched = {p for p in (*given, *received) if p in valued_pos}
+        context["trade"]["roster_fit"] = {
+            pos: {
+                "before": before.get(pos, 0),
+                "after": before.get(pos, 0) - given.get(pos, 0) + received.get(pos, 0),
+            }
+            for pos in touched
+        }
+
         if diff > 0 and gap_pct >= EVEN_GAP_PCT:
             in_trade = set(body.give) | set(body.receive)
             candidates = [
