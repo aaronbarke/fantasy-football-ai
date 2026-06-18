@@ -40,6 +40,21 @@ TRADE_QUESTION = (
 EVEN_GAP_PCT = 0.08
 
 
+def grade_trade(give_value: float, receive_value: float) -> tuple[str, float, float]:
+    """Returns (verdict, diff, gap_pct). Grading is by the gap relative to the
+    larger side, so it's independent of the value scale."""
+    diff = round(receive_value - give_value, 1)
+    bigger = max(give_value, receive_value, 1)
+    gap_pct = abs(diff) / bigger
+    if gap_pct < EVEN_GAP_PCT:
+        verdict = "Roughly even trade"
+    elif diff > 0:
+        verdict = f"You win by {diff:.1f}"
+    else:
+        verdict = f"You lose by {-diff:.1f}"
+    return verdict, diff, gap_pct
+
+
 class TradeRequest(BaseModel):
     connection_id: str
     give: list[str] = Field(min_length=1, max_length=6)
@@ -116,15 +131,7 @@ async def analyze_trade(
 
     give_value = side_total(values, body.give)
     receive_value = side_total(values, body.receive)
-    diff = receive_value - give_value
-    bigger = max(give_value, receive_value, 1)
-    gap_pct = abs(diff) / bigger
-    if gap_pct < EVEN_GAP_PCT:
-        verdict = "Roughly even trade"
-    elif diff > 0:
-        verdict = f"You win by {diff:.1f}"
-    else:
-        verdict = f"You lose by {-diff:.1f}"
+    verdict, diff, gap_pct = grade_trade(give_value, receive_value)
     context["trade"]["value_summary"] = {
         "you_give_total": give_value,
         "you_receive_total": receive_value,
