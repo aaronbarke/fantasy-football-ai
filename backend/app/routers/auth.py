@@ -17,6 +17,7 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.utils.security import (
+    DEMO_EMAIL,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -29,7 +30,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
-DEMO_EMAIL = "demo@ffai.app"
 
 
 def _tokens_for(user: User) -> TokenResponse:

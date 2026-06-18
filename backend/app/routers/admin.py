@@ -16,7 +16,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import User
 from app.services.nfl_data_service import sync_id_crosswalk, sync_weekly_stats
-from app.utils.security import get_current_user
+from app.utils.security import require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 @router.post("/refresh-stats")
 async def refresh_stats(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Re-pull NFL weekly stats for the current and prior season.

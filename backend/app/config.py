@@ -31,9 +31,22 @@ class Settings(BaseSettings):
     enable_scheduler: bool = False
     current_season: int = 2026
 
+    # "development" | "production" — gates secret checks and admin fallbacks
+    environment: str = "development"
+    # Comma-separated emails allowed to hit admin endpoints (empty = dev only)
+    admin_emails: str = ""
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def admin_email_list(self) -> list[str]:
+        return [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.lower() == "production"
 
 
 @lru_cache
