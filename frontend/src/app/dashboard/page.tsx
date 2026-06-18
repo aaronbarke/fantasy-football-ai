@@ -9,7 +9,7 @@ import PlayerAvatar from "@/components/PlayerAvatar";
 import { api } from "@/lib/api";
 import type { Matchup, Roster, StandingsEntry } from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
-import { formatRecord, positionColor } from "@/lib/utils";
+import { formatRecord, positionColor, timeAgo } from "@/lib/utils";
 import {
   Activity,
   AlertTriangle,
@@ -171,25 +171,32 @@ export default function DashboardPage() {
             )}
           </div>
 
-          <div className="flex items-center gap-2 self-start">
-            <button
-              onClick={syncNow}
-              disabled={syncing}
-              title="Re-sync this league's rosters, standings, and matchups"
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
-              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-              Sync league
-            </button>
-            <button
-              onClick={refreshStats}
-              disabled={refreshingStats}
-              title="Re-pull this week's NFL stats — refreshes values, projections & schedule strength"
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
-              <Database className={`h-4 w-4 ${refreshingStats ? "animate-pulse" : ""}`} />
-              {refreshingStats ? "Refreshing…" : "Refresh stats"}
-            </button>
+          <div className="flex flex-col items-stretch gap-1 self-start sm:items-end">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={syncNow}
+                disabled={syncing}
+                title="Re-sync this league's rosters, standings, and matchups"
+                className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                Sync league
+              </button>
+              <button
+                onClick={refreshStats}
+                disabled={refreshingStats}
+                title="Re-pull this week's NFL stats — refreshes values, projections & schedule strength"
+                className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                <Database className={`h-4 w-4 ${refreshingStats ? "animate-pulse" : ""}`} />
+                {refreshingStats ? "Refreshing…" : "Refresh stats"}
+              </button>
+            </div>
+            {league?.last_synced_at && (
+              <p className="text-[11px] text-gray-400">
+                Synced {timeAgo(league.last_synced_at)}
+              </p>
+            )}
           </div>
         </div>
 
