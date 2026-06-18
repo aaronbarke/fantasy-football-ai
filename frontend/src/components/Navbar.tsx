@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, clearTokens, getSelectedLeague, getToken, setSelectedLeague } from "@/lib/api";
 import type { LeagueConnection } from "@/lib/types";
-import { ChevronDown, LogOut, Moon, Plus, Sun, Wrench } from "lucide-react";
+import { ChevronDown, LogOut, Menu, Moon, Plus, Sun, Wrench, X } from "lucide-react";
 
 const links = [
   { href: "/dashboard", label: "Dashboard" },
@@ -30,6 +30,7 @@ export default function Navbar() {
   const router = useRouter();
   const [toolsOpen, setToolsOpen] = useState(false);
   const [leagueOpen, setLeagueOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [dark, setDark] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -46,6 +47,13 @@ export default function Navbar() {
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, []);
+
+  // Close any open menus when the route changes
+  useEffect(() => {
+    setMobileOpen(false);
+    setToolsOpen(false);
+    setLeagueOpen(false);
+  }, [pathname]);
 
   const { data: leagues } = useQuery({
     queryKey: ["leagues"],
@@ -73,7 +81,8 @@ export default function Navbar() {
 
   return (
     <nav className="sticky top-0 z-40 border-b border-gray-200/70 bg-white/85 backdrop-blur-md dark:border-gray-800/70 dark:bg-gray-950/80">
-      <div ref={wrapRef} className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+      <div ref={wrapRef} className="mx-auto max-w-6xl px-4">
+       <div className="flex items-center justify-between py-3">
         <div className="flex items-center gap-4">
           <Link href="/dashboard" className="text-lg font-bold text-green-700 dark:text-green-400">
             FF<span className="text-gray-900 dark:text-gray-100">AI</span>
@@ -196,7 +205,35 @@ export default function Navbar() {
             <LogOut className="h-4 w-4" />
             <span className="hidden sm:inline">Sign out</span>
           </button>
+          <button
+            onClick={() => setMobileOpen((o) => !o)}
+            aria-label="Menu"
+            className="rounded-md p-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:hidden"
+          >
+            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
         </div>
+       </div>
+
+       {/* Mobile menu */}
+       {mobileOpen && (
+         <div className="border-t border-gray-200/70 py-2 dark:border-gray-800/70 md:hidden">
+           {[...links, ...tools].map((l) => (
+             <Link
+               key={l.href}
+               href={l.href}
+               onClick={() => setMobileOpen(false)}
+               className={`block rounded-md px-3 py-2 text-sm font-medium ${
+                 pathname === l.href
+                   ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300"
+                   : "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+               }`}
+             >
+               {l.label}
+             </Link>
+           ))}
+         </div>
+       )}
       </div>
     </nav>
   );
