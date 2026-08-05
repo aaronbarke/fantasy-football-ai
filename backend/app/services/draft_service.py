@@ -74,6 +74,23 @@ BLEND_ESTABLISHED = 0.55  # >= 8 games: trust both
 BLEND_THIN = 0.75  # 3-7 games: lean on ESPN
 MIN_GAMES_FOR_HISTORY = 3
 
+# Injury designations that mean real missed time. ESPN's projection already
+# prices these in (a PUP tight end projects far below his healthy history), but
+# our recency-weighted history does not — so for these, history may only drag a
+# projection DOWN, never inflate it above ESPN's number.
+SERIOUS_INJURY = {"ir", "pup", "out", "suspended", "susp", "nfi", "doubtful"}
+# Fallback season multiplier on history when a hurt player has no ESPN number to
+# anchor to — rough games-missed haircuts, worst designations cutting deepest.
+INJURY_HISTORY_DISCOUNT = {
+    "ir": 0.20,
+    "nfi": 0.40,
+    "suspended": 0.45,
+    "susp": 0.45,
+    "pup": 0.55,
+    "out": 0.60,
+    "doubtful": 0.85,
+}
+
 # Tiers are cut at the biggest scoring cliffs, capped so the board stays
 # readable, and only across the range of a position anyone actually drafts
 # (a multiple of its replacement rank).
@@ -287,6 +304,45 @@ def _blend(espn: float | None, own: float | None, games: int) -> tuple[float, st
     return 0.0, "none"
 
 
+def _status_adjust(
+    points: float,
+    source: str,
+    espn: float | None,
+    own_total: float | None,
+    injury_status: str | None,
+    team: str | None,
+) -> tuple[float, str, str | None]:
+    """Correct a projection for injury and roster status.
+
+    Returns (points, source, roster_status). ESPN's projection is the injury- and
+    role-aware signal; our history is not. So a seriously injured player is
+    capped at ESPN's number (history can't lift him), and a player with no team
+    is handed back to the ADP-implied fill pass rather than trusting a stale
+    history that assumes a role he no longer has.
+    """
+    status = (injury_status or "").lower()
+    serious = status in SERIOUS_INJURY
+    teamless = not team
+
+    if teamless:
+        # No team → no role. Drop the history-based number; the fill pass will
+        # substitute the market's ADP-implied value (or he falls off the board).
+        if source in ("history", "none"):
+            return 0.0, "none", "free_agent"
+        # A rare teamless-but-ESPN-projected case: keep ESPN, still flag it.
+        return points, source, "free_agent"
+
+    if serious:
+        if espn is not None and points > espn:
+            return espn, "espn_injury", "injured"  # history may not inflate
+        if espn is None and own_total is not None:
+            discounted = own_total * INJURY_HISTORY_DISCOUNT.get(status, 0.6)
+            return discounted, "injury_discount", "injured"
+        return points, source, "injured"
+
+    return points, source, None
+
+
 def _adp_implied(known: list[tuple[float, float]], adp: float) -> float | None:
     """Interpolate a projection for a player who has ADP but no projection.
 
@@ -358,6 +414,14 @@ async def compute_draft_board(
         ppg, games = history.get(profile.player_id, (None, 0))
         own_total = ppg * GAMES_IN_SEASON if ppg else None
         points, source = _blend(profile.espn_season_proj, own_total, games)
+        points, source, roster_status = _status_adjust(
+            points,
+            source,
+            profile.espn_season_proj,
+            own_total,
+            player.injury_status,
+            player.team,
+        )
         rows.append(
             {
                 "player_id": player.id,
@@ -365,6 +429,7 @@ async def compute_draft_board(
                 "position": player.position,
                 "team": player.team,
                 "injury_status": player.injury_status,
+                "roster_status": roster_status,
                 "bye_week": profile.bye_week,
                 "proj_points": points,
                 "proj_source": source,

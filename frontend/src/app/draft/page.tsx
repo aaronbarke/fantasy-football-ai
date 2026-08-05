@@ -16,6 +16,7 @@ interface BoardPlayer {
   position: string;
   team: string | null;
   injury_status: string | null;
+  roster_status: string | null;
   bye_week: number | null;
   proj_points: number;
   proj_source: string;
@@ -419,6 +420,14 @@ export default function DraftPage() {
                               className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${injuryColor(p.injury_status)}`}
                             >
                               {p.injury_status}
+                            </span>
+                          )}
+                          {p.roster_status === "free_agent" && (
+                            <span
+                              title="No NFL team — projection is market-implied only"
+                              className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-bold text-gray-600 dark:bg-gray-500/20 dark:text-gray-300"
+                            >
+                              FA
                             </span>
                           )}
                           {news && news.length > 0 && (

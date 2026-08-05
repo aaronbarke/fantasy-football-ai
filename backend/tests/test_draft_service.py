@@ -7,6 +7,7 @@ from app.services.draft_service import (
     _blend,
     _marginal_multiplier,
     _recommend_cap,
+    _status_adjust,
     availability_at,
     recommend_picks,
     replacement_ranks,
@@ -177,6 +178,62 @@ class TestBlend:
 
     def test_nothing_known(self):
         assert _blend(None, None, 0) == (0.0, "none")
+
+
+class TestStatusAdjust:
+    def test_healthy_rostered_player_untouched(self):
+        points, source, status = _status_adjust(
+            220.0, "blend", espn=200.0, own_total=250.0,
+            injury_status=None, team="SF",
+        )
+        assert (points, source, status) == (220.0, "blend", None)
+
+    def test_injury_history_cannot_inflate_above_espn(self):
+        # The Kittle case: history says 265, ESPN (injury-aware) says 177.
+        points, source, status = _status_adjust(
+            216.0, "blend", espn=177.0, own_total=265.0,
+            injury_status="PUP", team="SF",
+        )
+        assert points == 177.0
+        assert source == "espn_injury"
+        assert status == "injured"
+
+    def test_injury_with_no_espn_number_discounts_history(self):
+        points, source, status = _status_adjust(
+            250.0, "history", espn=None, own_total=250.0,
+            injury_status="IR", team="BUF",
+        )
+        assert points < 250.0  # heavy IR haircut
+        assert status == "injured"
+
+    def test_injury_does_not_lift_when_history_is_already_lower(self):
+        # If our number is already below ESPN, an injury flag shouldn't raise it.
+        points, _, status = _status_adjust(
+            150.0, "blend", espn=177.0, own_total=140.0,
+            injury_status="doubtful", team="SF",
+        )
+        assert points == 150.0
+        assert status == "injured"
+
+    def test_teamless_player_drops_history_for_the_fill_pass(self):
+        # The Diggs case: unsigned, so his stale history is discarded and he's
+        # handed to the ADP-implied fill pass (source "none").
+        points, source, status = _status_adjust(
+            223.0, "history", espn=None, own_total=223.0,
+            injury_status=None, team=None,
+        )
+        assert points == 0.0
+        assert source == "none"
+        assert status == "free_agent"
+
+    def test_questionable_is_not_treated_as_serious(self):
+        # Day-to-day tags shouldn't gut a projection.
+        points, source, status = _status_adjust(
+            220.0, "blend", espn=200.0, own_total=250.0,
+            injury_status="Questionable", team="SF",
+        )
+        assert points == 220.0
+        assert status is None
 
 
 def _cand(pid, name, position, vor, adp, **extra):
