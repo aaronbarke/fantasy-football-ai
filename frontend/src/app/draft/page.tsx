@@ -28,6 +28,7 @@ interface BoardPlayer {
   adp_rank: number | null;
   adp_delta: number | null;
   adp_stdev: number | null;
+  market_edge: number | null;
   value_score: number;
   is_tier_end: boolean;
   auction_value: number | null;
@@ -128,6 +129,20 @@ function ValueBadge({ score, delta }: { score: number; delta: number | null }) {
       className="flex items-center gap-0.5 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-bold text-green-700 dark:bg-green-500/15 dark:text-green-300"
     >
       <TrendingUp className="h-3 w-3" />+{delta}
+    </span>
+  );
+}
+
+function EspnEdgeBadge({ edge }: { edge: number | null }) {
+  // Positive edge = ESPN drafts him later than sharp mock-drafters, so he falls
+  // to you in an ESPN league. Only worth flagging when the gap is real.
+  if (edge == null || edge < 18) return null;
+  return (
+    <span
+      title={`Sharp drafters take him ~${Math.round(edge)} picks earlier than ESPN — falls to you if your league drafts off ESPN`}
+      className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"
+    >
+      ESPN value +{Math.round(edge)}
     </span>
   );
 }
@@ -415,6 +430,7 @@ export default function DraftPage() {
                           {p.name}
                           <TierBadge tier={p.tier} />
                           <ValueBadge score={p.value_score} delta={p.adp_delta} />
+                          <EspnEdgeBadge edge={p.market_edge} />
                           {p.injury_status && (
                             <span
                               className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${injuryColor(p.injury_status)}`}

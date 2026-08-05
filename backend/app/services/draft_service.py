@@ -154,6 +154,8 @@ WAIT_DISCOUNT = 0.25
 BYE_PENALTY = 4.0  # per colliding bye week
 BYE_CONFLICT_FLOOR = 2  # one shared bye is normal; three is a problem
 VALUE_NOTABLE = 15.0  # value_score worth mentioning in the reasons
+# ESPN-vs-sharp ADP gap (picks) big enough to call out as a market edge.
+MARKET_EDGE_NOTABLE = 18.0
 INJURY_PENALTY = {"out": 30.0, "ir": 45.0, "doubtful": 20.0, "questionable": 5.0}
 
 
@@ -437,6 +439,14 @@ async def compute_draft_board(
                 "adp_espn": profile.adp_espn,
                 "adp_ffc": profile.adp_ffc,
                 "adp_stdev": profile.adp_stdev,
+                # ESPN's casual crowd vs sharp mock-drafters (FFC). Positive =
+                # ESPN drafts him later than the sharps do, so he falls to you in
+                # an ESPN league while your leaguemates chase ESPN's board.
+                "market_edge": (
+                    round(profile.adp_espn - profile.adp_ffc, 1)
+                    if profile.adp_espn is not None and profile.adp_ffc is not None
+                    else None
+                ),
                 "auction_value": profile.auction_value,
                 "times_drafted": profile.times_drafted,
             }
@@ -732,6 +742,13 @@ def recommend_picks(
 
         if r.get("value_score", 0) >= VALUE_NOTABLE:
             reasons.append(f"Going {r['adp_delta']} picks later than we rank him")
+
+        edge = r.get("market_edge")
+        if edge is not None and edge >= MARKET_EDGE_NOTABLE:
+            reasons.append(
+                f"Sharps draft him ~{round(edge)} picks earlier than ESPN — "
+                f"value if your league drafts off ESPN"
+            )
 
         bye = r.get("bye_week")
         conflicts = my_byes.get(bye, 0) if bye else 0
