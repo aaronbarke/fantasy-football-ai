@@ -14,7 +14,11 @@ from app.models import (
     PlayerStatsWeekly,
     Roster,
 )
-from app.services.espn_service import ESPNClient
+from app.services.espn_service import (
+    ESPNClient,
+    roster_positions_from_espn,
+    scoring_type_from_espn,
+)
 from app.services.sleeper_service import SleeperClient
 from app.utils.constants import FANTASY_POSITIONS
 from app.utils.player_id_map import espn_to_sleeper_map
@@ -194,6 +198,13 @@ async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
         await client.close()
 
     conn.league_name = (data.get("settings") or {}).get("name") or conn.league_name
+    # Pull the league's own scoring and roster shape so the draft board, mock
+    # drafts, and game plan are tuned to this league instead of a generic PPR
+    # default. (get_rosters() bundles mSettings, so it's already in `data`.)
+    conn.scoring_type = scoring_type_from_espn(data)
+    roster_positions = roster_positions_from_espn(data)
+    if roster_positions:
+        conn.roster_positions = roster_positions
     espn_map = await espn_to_sleeper_map(db)
 
     # Identify the user's team from their SWID cookie (ESPN owner GUIDs are SWIDs)

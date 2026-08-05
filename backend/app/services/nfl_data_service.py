@@ -123,12 +123,15 @@ async def sync_id_crosswalk(db: AsyncSession) -> int:
         gsis = _clean(getattr(row, "gsis_id", None))
         espn = _clean(getattr(row, "espn_id", None))
         yahoo = _clean(getattr(row, "yahoo_id", None))
+        fp = _clean(getattr(row, "fantasypros_id", None))
         if gsis:
             player.gsis_id = str(gsis)
         if espn and not player.espn_id:
             player.espn_id = str(int(espn)) if isinstance(espn, float) else str(espn)
         if yahoo and not player.yahoo_id:
             player.yahoo_id = str(int(yahoo)) if isinstance(yahoo, float) else str(yahoo)
+        if fp and not player.fp_id:
+            player.fp_id = str(int(fp)) if isinstance(fp, float) else str(fp)
         count += 1
     await db.commit()
     logger.info("ID crosswalk sync: %d players updated", count)

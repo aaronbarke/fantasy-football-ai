@@ -21,7 +21,8 @@ const tools = [
   { href: "/trade", label: "Trade analyzer" },
   { href: "/schedule", label: "Schedule strength" },
   { href: "/compare", label: "Compare players" },
-  { href: "/draft", label: "Draft assistant" },
+  { href: "/draft", label: "Draft room" },
+  { href: "/mock", label: "Mock draft" },
   { href: "/betting", label: "Betting edge" },
 ];
 

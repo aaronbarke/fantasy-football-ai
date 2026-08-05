@@ -22,6 +22,7 @@ class Player(Base):
     espn_id: Mapped[str | None] = mapped_column(String(50), index=True)
     yahoo_id: Mapped[str | None] = mapped_column(String(50))
     gsis_id: Mapped[str | None] = mapped_column(String(50), index=True)  # nflverse ID
+    fp_id: Mapped[str | None] = mapped_column(String(50), index=True)  # FantasyPros ID
     injury_status: Mapped[str | None] = mapped_column(String(50))
     injury_body_part: Mapped[str | None] = mapped_column(String(100))
     depth_chart_order: Mapped[int | None] = mapped_column(Integer)

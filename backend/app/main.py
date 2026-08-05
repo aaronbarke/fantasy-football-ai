@@ -14,9 +14,11 @@ from app.routers import (
     auth,
     betting,
     chat,
+    draft,
     gameplan,
     games,
     leagues,
+    mock_draft,
     players,
     recommendations,
     trade,
@@ -109,6 +111,8 @@ app.include_router(trade.router)
 app.include_router(recommendations.router)
 app.include_router(betting.router)
 app.include_router(gameplan.router)
+app.include_router(draft.router)
+app.include_router(mock_draft.router)
 app.include_router(admin.router)
 
 

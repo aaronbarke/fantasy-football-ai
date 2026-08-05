@@ -7,8 +7,13 @@ import type { LeagueConnection } from "@/lib/types";
 import { useRouter } from "next/navigation";
 
 /** Loads the user's leagues, keeps a selected league in localStorage, and
- * redirects to /login (no token) or /connect (no leagues). */
-export function useLeague() {
+ * redirects to /login (no token) or /connect (no leagues).
+ *
+ * Pass `requireLeague: false` for pages that work standalone — the draft room
+ * only uses a connection to auto-fill scoring and roster settings, and falls
+ * back to 12-team PPR without one, so bouncing an unlinked user to /connect
+ * would lock them out of a tool they can use as-is. */
+export function useLeague({ requireLeague = true }: { requireLeague?: boolean } = {}) {
   const router = useRouter();
   // Initialize synchronously from localStorage so navigating between tabs keeps
   // the chosen league instead of snapping back to the first one. (Reading it in
@@ -28,7 +33,7 @@ export function useLeague() {
   useEffect(() => {
     if (!leagues || isFetching) return;
     if (leagues.length === 0) {
-      router.push("/connect");
+      if (requireLeague) router.push("/connect");
       return;
     }
     // Honor a valid stored selection; only fall back to the first league when

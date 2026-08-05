@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
+from app.services.adp_service import sync_draft_profiles
+from app.services.news_service import sync_news
 from app.services.nfl_data_service import sync_id_crosswalk, sync_weekly_stats
 from app.utils.security import require_admin
 
@@ -48,4 +50,33 @@ async def refresh_stats(
         "seasons": seasons,
         "weekly_rows": weekly_rows,
         "id_crosswalk_rows": crosswalk,
+    }
+
+
+@router.post("/refresh-draft")
+async def refresh_draft(
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pull ADP, auction values, season projections, and player news.
+
+    This is what the draft board and mock drafts read from. Run it once before
+    a draft — the scheduled job only fires twice a day, and ADP moves fast in
+    August. Requires the ID crosswalk (refresh-stats) to have run at least once
+    so ESPN and news items can be matched to players.
+    """
+    settings = get_settings()
+    try:
+        profiles = await sync_draft_profiles(db, settings.current_season)
+        news_items = await sync_news(db)
+    except Exception as exc:
+        logger.exception("Manual draft refresh failed")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Draft refresh failed: {exc}"
+        ) from exc
+    return {
+        "status": "ok",
+        "season": settings.current_season,
+        "draft_profiles": profiles,
+        "news_items": news_items,
     }

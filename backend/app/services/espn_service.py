@@ -90,6 +90,25 @@ class ESPNClient:
         return all_ids, starter_ids
 
 
+def roster_positions_from_espn(settings_blob: dict) -> list[str] | None:
+    """ESPN lineupSlotCounts → a flat roster_positions list (Sleeper-style).
+
+    Expands each lineup slot by its count into the same shape Sleeper leagues
+    store, so `starters_per_team` and the draft board treat both platforms
+    identically. Order is irrelevant downstream — only the counts matter.
+    """
+    try:
+        counts = settings_blob["settings"]["rosterSettings"]["lineupSlotCounts"]
+    except (KeyError, TypeError):
+        return None
+    positions: list[str] = []
+    for slot_id, n in (counts or {}).items():
+        name = SLOT_MAP.get(int(slot_id))
+        if name and n:
+            positions.extend([name] * int(n))
+    return positions or None
+
+
 def scoring_type_from_espn(settings_blob: dict) -> str:
     """ESPN scoringSettings → ppr / half_ppr / standard.
     Stat 53 is receptions in ESPN's scoring item list."""

@@ -4,6 +4,8 @@ Cadence:
 - Weekly stats: Tuesday 6 AM CT (Monday night stats finalize overnight)
 - Player pool: daily 5 AM CT (Sleeper asks for max 1 call/day on /players/nfl)
 - Injuries: every 4 hours
+- Player news: every 2 hours (camp intel moves draft stock fast)
+- Draft data (ADP/projections): 5 AM + 5 PM CT — ADP moves fast in August
 - Odds: 8 AM + 8 PM CT (free tier budget: 500 req/month)
 - League sync: every 2 hours
 - Weather: Thu–Mon 6 AM + noon CT (game days only)
@@ -19,7 +21,9 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import GameCondition, LeagueConnection
+from app.services.adp_service import sync_draft_profiles
 from app.services.injury_service import sync_injuries
+from app.services.news_service import sync_news
 from app.services.nfl_data_service import sync_id_crosswalk, sync_weekly_stats
 from app.services.odds_service import sync_odds
 from app.services.sleeper_service import SleeperClient
@@ -51,6 +55,17 @@ async def job_refresh_weekly_stats() -> None:
 async def job_refresh_player_pool() -> None:
     async with SessionLocal() as db:
         await sync_player_pool(db)
+
+
+async def job_refresh_draft_data() -> None:
+    settings = get_settings()
+    async with SessionLocal() as db:
+        await sync_draft_profiles(db, settings.current_season)
+
+
+async def job_refresh_news() -> None:
+    async with SessionLocal() as db:
+        await sync_news(db)
 
 
 async def job_refresh_injuries() -> None:
@@ -182,6 +197,18 @@ def start_scheduler() -> None:
         job_refresh_injuries,
         IntervalTrigger(hours=4),
         id="injuries",
+        misfire_grace_time=600,
+    )
+    scheduler.add_job(
+        job_refresh_draft_data,
+        CronTrigger(hour="5,17"),
+        id="draft_data",
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        job_refresh_news,
+        IntervalTrigger(hours=2),
+        id="news",
         misfire_grace_time=600,
     )
     scheduler.add_job(
