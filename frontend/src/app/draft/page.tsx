@@ -6,7 +6,7 @@ import Navbar from "@/components/Navbar";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import { injuryColor, positionColor, timeAgo } from "@/lib/utils";
-import { RotateCcw, Sparkles, TrendingUp, Newspaper } from "lucide-react";
+import { RotateCcw, Sparkles, TrendingUp, Newspaper, Radio } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -67,6 +67,18 @@ interface Recommendation extends BoardPlayer {
 interface RecommendResponse {
   needs: Record<string, { required: number; have: number; unfilled: number }>;
   recommendations: Recommendation[];
+}
+
+interface LiveDraft {
+  status: "not_started" | "in_progress" | "complete" | "unavailable";
+  total_picks: number;
+  picks_made: number;
+  your_team_id: string | null;
+  your_slot: number | null;
+  on_the_clock: { overall_pick: number; is_you: boolean } | null;
+  drafted_player_ids: string[];
+  your_player_ids: string[];
+  unmapped_count: number;
 }
 
 type DraftMark = "me" | "gone";
@@ -166,18 +178,19 @@ function AvailabilityPill({ pct }: { pct: number }) {
 
 export default function DraftPage() {
   const { league } = useLeague({ requireLeague: false });
-  const [drafted, setDrafted] = useState<Record<string, DraftMark>>({});
+  const [manualDrafted, setManualDrafted] = useState<Record<string, DraftMark>>({});
   const [filter, setFilter] = useState("ALL");
   const [teams, setTeams] = useState(12);
   const [slot, setSlot] = useState(1);
   const [advice, setAdvice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [liveSync, setLiveSync] = useState(false);
 
   useEffect(() => {
     try {
       const savedState = localStorage.getItem(STATE_KEY);
-      if (savedState) setDrafted(JSON.parse(savedState));
+      if (savedState) setManualDrafted(JSON.parse(savedState));
       const savedSettings = localStorage.getItem(SETTINGS_KEY);
       if (savedSettings) {
         const s = JSON.parse(savedSettings);
@@ -195,7 +208,7 @@ export default function DraftPage() {
   }, [teams, slot, loaded]);
 
   function mark(id: string, value: DraftMark | null) {
-    setDrafted((d) => {
+    setManualDrafted((d) => {
       const next = { ...d };
       if (value === null) delete next[id];
       else next[id] = value;
@@ -203,6 +216,29 @@ export default function DraftPage() {
       return next;
     });
   }
+
+  const isEspn = league?.platform === "espn";
+
+  // Poll the real ESPN draft while live sync is on. Its picks become the source
+  // of truth for what's off the board, replacing manual My-pick/Gone tracking.
+  const { data: live } = useQuery({
+    queryKey: ["liveDraft", league?.id],
+    queryFn: () => api<LiveDraft>(`/api/draft/live?connection_id=${league!.id}`),
+    enabled: liveSync && !!league?.id && isEspn,
+    refetchInterval: 6000,
+  });
+
+  // When live, the ESPN feed drives the board: your picks are "me", everyone
+  // else's are "gone". Otherwise fall back to manual tracking.
+  const drafted = useMemo<Record<string, DraftMark>>(() => {
+    if (liveSync && live) {
+      const map: Record<string, DraftMark> = {};
+      for (const id of live.drafted_player_ids) map[id] = "gone";
+      for (const id of live.your_player_ids) map[id] = "me";
+      return map;
+    }
+    return manualDrafted;
+  }, [liveSync, live, manualDrafted]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["draftBoard", league?.id],
@@ -212,6 +248,20 @@ export default function DraftPage() {
       ),
     staleTime: 30 * 60_000,
   });
+
+  // In live mode the league is the source of truth: adopt its team count (so
+  // snake-pick math is right) and your real draft slot from the feed.
+  useEffect(() => {
+    if (liveSync && data?.league_size && data.league_size !== teams) {
+      setTeams(data.league_size);
+    }
+  }, [liveSync, data?.league_size, teams]);
+
+  useEffect(() => {
+    if (liveSync && live?.your_slot && live.your_slot !== slot) {
+      setSlot(live.your_slot);
+    }
+  }, [liveSync, live?.your_slot, slot]);
 
   const board = useMemo(() => data?.players ?? [], [data]);
   const myIds = useMemo(
@@ -298,7 +348,7 @@ export default function DraftPage() {
           <button
             onClick={() => {
               localStorage.removeItem(STATE_KEY);
-              setDrafted({});
+              setManualDrafted({});
               setAdvice(null);
             }}
             className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-100"
@@ -307,6 +357,50 @@ export default function DraftPage() {
           </button>
         </div>
 
+        {/* Live sync (ESPN) */}
+        {isEspn && (
+          <div
+            className={`mt-5 flex flex-wrap items-center gap-3 rounded-xl border p-4 ${
+              liveSync
+                ? "border-green-300 bg-green-50 dark:border-green-500/40"
+                : "border-gray-200 bg-white"
+            }`}
+          >
+            <button
+              onClick={() => setLiveSync((v) => !v)}
+              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold ${
+                liveSync
+                  ? "bg-green-600 text-white hover:bg-green-700"
+                  : "border border-gray-300 hover:bg-gray-100"
+              }`}
+            >
+              <Radio className="h-4 w-4" />
+              {liveSync ? "Live sync on" : "Sync my ESPN draft"}
+            </button>
+            {liveSync && live && (
+              <span className="text-sm text-gray-600">
+                {live.status === "not_started" &&
+                  "Draft hasn't started — picks will appear here as they happen."}
+                {live.status === "in_progress" &&
+                  `Live · ${live.picks_made}/${live.total_picks} picked` +
+                    (live.on_the_clock
+                      ? live.on_the_clock.is_you
+                        ? " · you're on the clock"
+                        : ` · pick #${live.on_the_clock.overall_pick} on the clock`
+                      : "")}
+                {live.status === "complete" && "Draft complete."}
+                {live.status === "unavailable" &&
+                  "Couldn't reach the ESPN draft — check your league is synced."}
+              </span>
+            )}
+            {liveSync && (live?.unmapped_count ?? 0) > 0 && (
+              <span className="text-xs text-amber-600">
+                {live!.unmapped_count} pick(s) not matched to our player pool
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Draft position */}
         <div className="mt-5 flex flex-wrap items-center gap-4 rounded-xl border border-gray-200 bg-white p-4">
           <label className="flex items-center gap-2 text-sm">
@@ -314,7 +408,8 @@ export default function DraftPage() {
             <select
               value={teams}
               onChange={(e) => setTeams(Number(e.target.value))}
-              className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+              disabled={liveSync}
+              className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm disabled:opacity-50"
             >
               {[8, 10, 12, 14, 16].map((n) => (
                 <option key={n} value={n}>
@@ -328,7 +423,8 @@ export default function DraftPage() {
             <select
               value={slot}
               onChange={(e) => setSlot(Number(e.target.value))}
-              className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm"
+              disabled={liveSync}
+              className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm disabled:opacity-50"
             >
               {Array.from({ length: teams }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
@@ -474,18 +570,24 @@ export default function DraftPage() {
                       {avail != null && followingPick && avail > 0.02 && (
                         <AvailabilityPill pct={Math.round(avail * 100)} />
                       )}
-                      <button
-                        onClick={() => mark(p.player_id, "me")}
-                        className="rounded-md bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700"
-                      >
-                        My pick
-                      </button>
-                      <button
-                        onClick={() => mark(p.player_id, "gone")}
-                        className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100"
-                      >
-                        Gone
-                      </button>
+                      {/* Live sync drives the board from the real draft, so the
+                          manual pick controls step aside. */}
+                      {!liveSync && (
+                        <>
+                          <button
+                            onClick={() => mark(p.player_id, "me")}
+                            className="rounded-md bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700"
+                          >
+                            My pick
+                          </button>
+                          <button
+                            onClick={() => mark(p.player_id, "gone")}
+                            className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100"
+                          >
+                            Gone
+                          </button>
+                        </>
+                      )}
                     </div>
                   </li>
                 );

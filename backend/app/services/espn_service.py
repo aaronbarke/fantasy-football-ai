@@ -60,6 +60,12 @@ class ESPNClient:
     async def get_matchups(self) -> dict:
         return await self._get(["mMatchup"])
 
+    async def get_draft_detail(self) -> dict:
+        """Live draft board. `draftDetail.picks` carries one slot per overall
+        pick; `playerId` is -1 until that pick is made, then the ESPN player id.
+        `inProgress`/`drafted` flag the draft's state."""
+        return await self._get(["mDraftDetail"])
+
     async def get_free_agents(self, limit: int = 100) -> dict:
         """Free agents + waiver players, sorted by ownership. Uses the
         X-Fantasy-Filter header — ESPN's mechanism for filtering player queries."""

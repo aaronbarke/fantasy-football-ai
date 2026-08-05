@@ -18,6 +18,7 @@ from app.services.draft_service import (
     replacement_ranks,
     roster_needs,
 )
+from app.services.live_draft_service import espn_live_draft_state
 from app.services.news_service import recent_news_by_player
 from app.utils.security import get_current_user
 
@@ -166,6 +167,24 @@ async def _board_for(
     return board, scoring, league_size, roster_positions
 
 
+@router.get("/live")
+async def live_draft(
+    connection_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Live state of the connected league's real draft, for the draft room to
+    poll and auto-mark picks. ESPN only — Sleeper support can follow the same
+    shape. Returns a `not_started` shell for platforms without a live feed."""
+    conn = await _get_conn(db, user, connection_id)
+    if conn.platform != "espn":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Live draft sync is only available for ESPN leagues right now",
+        )
+    return await espn_live_draft_state(db, conn)
+
+
 @router.post("/recommend")
 async def draft_recommend(
     body: RecommendRequest,
@@ -248,6 +267,13 @@ async def draft_advice(
         for pid in body.my_player_ids
         if pid in by_id
     ]
+
+    # Latest news on the players in play, so the AI weighs camp reports, injury
+    # updates, and role changes the static projection can't see.
+    news = await recent_news_by_player(
+        db, [pick["player_id"] for pick in picks], per_player=2
+    )
+
     context = {
         "question_type": "draft",
         "season": get_settings().current_season,
@@ -264,22 +290,29 @@ async def draft_advice(
         ),
         "candidates": [
             {
-                key: pick[key]
-                for key in (
-                    "name",
-                    "position",
-                    "team",
-                    "tier",
-                    "proj_points",
-                    "vor",
-                    "adp",
-                    "adp_delta",
-                    "is_tier_end",
-                    "available_at_following_pick",
-                    "injury_status",
-                    "bye_week",
-                    "reasons",
-                )
+                **{
+                    key: pick[key]
+                    for key in (
+                        "name",
+                        "position",
+                        "team",
+                        "tier",
+                        "proj_points",
+                        "vor",
+                        "adp",
+                        "adp_delta",
+                        "market_edge",
+                        "is_tier_end",
+                        "available_at_following_pick",
+                        "injury_status",
+                        "roster_status",
+                        "bye_week",
+                        "reasons",
+                    )
+                },
+                "recent_news": [
+                    n["headline"] for n in news.get(pick["player_id"], [])
+                ],
             }
             for pick in picks
         ],
