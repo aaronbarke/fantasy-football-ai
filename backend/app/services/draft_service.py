@@ -111,22 +111,36 @@ VALUE_VOR_SCALE = 40.0
 
 # Recommendation weights.
 #
-# The value of a pick is not its raw VOR — it's how much that player adds to
-# *your* roster. Once your starting slots at a position are full, each further
-# body is bench depth worth steeply less, because it only plays on byes,
-# injuries, or a breakout. Without this, the assistant is a pure VOR-maximizer
-# that happily recommends your ninth tight end (mid-tier TEs carry deceptively
-# high VOR against their shallow replacement level).
-#
-# The multiplier decays smoothly with how far past your starters a player sits,
-# so fractional flex demand (RB ~2.4 starters) is handled without a cliff.
+# The value of a pick is not its raw VOR — it's what that player adds to *your*
+# starting lineup. A player filling an open starting slot (a dedicated spot or a
+# FLEX) is worth having; a player who can only sit behind someone is bench depth
+# worth far less. Crucially, that depends on the *slot*, not the position's VOR
+# sign: a below-replacement RB (negative VOR) still slots into your FLEX on a bye
+# or injury, while a second QB behind your starter — however high his VOR reads —
+# barely plays. Scoring on VOR alone recommends a backup QB over the RB depth you
+# actually need, which is the bug this models around.
 STARTER_FILL_BONUS = 0.15  # nudge toward completing an empty starting slot
-# How fast a position's value decays once your starters are full, per "starter's
-# worth" of surplus. Position-specific on purpose: you only ever start one QB
-# and one TE, so a second is a luxury that decays hard; RB and WR depth actually
-# plays every week through the flex, byes, and injuries, so it holds value.
-BENCH_BASE_BY_POS = {"QB": 0.28, "RB": 0.55, "WR": 0.55, "TE": 0.30}
-BENCH_BASE_DEFAULT = 0.45
+# A filled starting slot is worth at least this, even if the only players left at
+# that position grade below replacement — you have to field someone there.
+STARTER_VALUE_FLOOR = 12.0
+# Bench value by position. QB and TE are single-slot: a backup rarely cracks the
+# lineup, so it's heavily discounted. RB and WR fill the FLEX and churn through
+# byes/injuries, so their depth is floored by projection (not VOR) — a startable-
+# caliber flex body keeps real value even when his VOR has gone negative.
+QB_BACKUP_FACTOR = 0.10
+TE_BACKUP_FACTOR = 0.22
+FLEX_DEPTH_VOR_WEIGHT = 0.5  # weight on VOR for RB/WR bench...
+FLEX_DEPTH_PROJ_FLOOR = 0.06  # ...floored by this fraction of projected points
+# A TE filling a FLEX slot is a luxury, not a flex starter you'd normally use —
+# you start one TE and flex an RB/WR. Also corrects for TE's shallow-replacement
+# VOR inflation, so a second elite TE doesn't outrank real RB/WR flex value.
+TE_FLEX_DISCOUNT = 0.5
+# RB startable supply dries up faster than WR (fewer bell-cows, more injuries),
+# so a startable RB is worth a touch more than an equal-value WR for flex/depth.
+RB_SCARCITY_BOOST = 1.12
+# Positions eligible for FLEX / SUPER_FLEX slots.
+FLEX_ELIGIBLE = ("RB", "WR", "TE")
+SUPERFLEX_ELIGIBLE = ("QB", "RB", "WR", "TE")
 # How many bench bodies past your starters are worth recommending at each
 # position. QB and TE need only a single backup (you start one, stream at most
 # two); RB and WR carry deep benches for the flex, byes, and injuries. The cap
@@ -572,24 +586,72 @@ def roster_needs(
     return needs
 
 
-def _marginal_multiplier(
-    position: str, have: int, starters: float
-) -> tuple[float, bool]:
-    """Value multiplier for the (have+1)-th body at a position, and whether it
-    fills a starting slot.
+def _roster_slots(
+    roster_positions: list[str] | None,
+) -> tuple[dict[str, int], int, int]:
+    """(dedicated starters per position, FLEX slots, SUPER_FLEX slots).
 
-    `starters` is the flex-adjusted average number this league starts (a float,
-    e.g. 2.4 RB). A player still inside that count is a starter at full value; a
-    player past it is bench depth, decaying smoothly (so the fractional flex
-    demand doesn't create a cliff) at a rate set by how much that position's
-    depth actually plays.
+    Unlike `starters_per_team`, which folds the flex into fractional per-position
+    demand (good for replacement level), this keeps the flex as its own shared
+    pool — what you need to decide whether a given player fills a real lineup
+    slot or rides the bench.
     """
-    have_after = have + 1
-    over = have_after - starters
-    if over <= 0:
-        return 1.0 + STARTER_FILL_BONUS, True
-    base = BENCH_BASE_BY_POS.get(position, BENCH_BASE_DEFAULT)
-    return base**over, False
+    slots = roster_positions or DEFAULT_ROSTER
+    dedicated: Counter = Counter()
+    flex = superflex = 0
+    for raw in slots:
+        s = (raw or "").upper()
+        if s in NON_STARTER_SLOTS:
+            continue
+        if s in FLEX_SLOTS:
+            flex += 1
+        elif s in SUPERFLEX_SLOTS:
+            superflex += 1
+        elif s in DRAFTABLE_POSITIONS:
+            dedicated[s] += 1
+    return dict(dedicated), flex, superflex
+
+
+def _lineup_value(
+    position: str,
+    vor: float,
+    proj_points: float,
+    held: Counter,
+    dedicated: dict[str, int],
+    flex_open: int,
+    superflex_open: int,
+) -> tuple[float, bool, str]:
+    """What this player is worth to your lineup, and whether he fills a start.
+
+    Returns (value, fills_starting_slot, reason). See the weights block above for
+    the reasoning: filling a slot (dedicated or flex) is worth at least a floor;
+    QB/TE backups are heavily discounted; RB/WR bench is floored by projection so
+    real flex depth outranks a backup quarterback.
+    """
+    have = held.get(position, 0)
+    ded = dedicated.get(position, 0)
+    scarcity = RB_SCARCITY_BOOST if position == "RB" else 1.0
+
+    if have < ded:
+        floor = max(vor, STARTER_VALUE_FLOOR)
+        return floor * scarcity, True, f"Fills a starting {position} slot"
+    if position in FLEX_ELIGIBLE and flex_open > 0:
+        floor = max(vor, STARTER_VALUE_FLOOR)
+        if position == "TE":
+            return floor * TE_FLEX_DISCOUNT, True, "TE in FLEX (luxury)"
+        return floor * scarcity, True, "Fills a FLEX slot"
+    if position in SUPERFLEX_ELIGIBLE and superflex_open > 0:
+        return max(vor, STARTER_VALUE_FLOOR), True, "Fills a SUPER FLEX slot"
+
+    # Bench depth.
+    if position == "QB":
+        return max(0.0, vor) * QB_BACKUP_FACTOR, False, "Backup QB — rarely starts"
+    if position == "TE":
+        return max(0.0, vor) * TE_BACKUP_FACTOR, False, "TE depth (bench)"
+    # RB/WR: flex-eligible depth, floored by projection so a startable body keeps
+    # value even below replacement.
+    value = max(vor * FLEX_DEPTH_VOR_WEIGHT, proj_points * FLEX_DEPTH_PROJ_FLOOR)
+    return value * scarcity, False, f"{position} depth (flex/bye insurance)"
 
 
 def _recommend_cap(position: str, starters: float) -> int:
@@ -690,6 +752,14 @@ def recommend_picks(
     )
     held = Counter(my_positions)
     starters = starters_per_team(roster_positions)
+    dedicated, flex_slots, superflex_slots = _roster_slots(roster_positions)
+    # Flex/superflex slots the roster hasn't consumed yet.
+    flex_used = sum(max(0, held.get(p, 0) - dedicated.get(p, 0)) for p in FLEX_ELIGIBLE)
+    sflex_used = sum(
+        max(0, held.get(p, 0) - dedicated.get(p, 0)) for p in SUPERFLEX_ELIGIBLE
+    ) - min(flex_used, flex_slots)
+    flex_open = max(0, flex_slots - flex_used)
+    superflex_open = max(0, superflex_slots - max(0, sflex_used))
     drops = _tier_drops(board)
 
     scored: list[dict] = []
@@ -700,18 +770,18 @@ def recommend_picks(
             continue  # roster is saturated here — stop suggesting it
         reasons: list[str] = []
 
-        # Marginal roster value: full for a starter, decaying for bench depth.
-        multiplier, is_starter = _marginal_multiplier(
-            position, have, starters.get(position, 0.0)
+        # Lineup-aware value: what this player adds to your starting lineup.
+        value, is_starter, fit_reason = _lineup_value(
+            position,
+            r["vor"],
+            r.get("proj_points", 0.0),
+            held,
+            dedicated,
+            flex_open,
+            superflex_open,
         )
-        score = r["vor"] * multiplier
-        if is_starter and have < round(starters.get(position, 0.0)):
-            reasons.append(
-                f"Fills a starting {position} slot "
-                f"({have}/{round(starters.get(position, 0.0))} rostered)"
-            )
-        elif not is_starter:
-            reasons.append(f"{position} depth (bench value)")
+        score = value
+        reasons.append(fit_reason)
 
         # Will he last? Everything urgent is scaled by how unlikely that is.
         availability = (
@@ -721,8 +791,8 @@ def recommend_picks(
         )
         urgency = 1.0 - availability if availability is not None else 0.5
 
-        if availability is not None and r["vor"] > 0:
-            score -= WAIT_DISCOUNT * r["vor"] * availability
+        if availability is not None and value > 0:
+            score -= WAIT_DISCOUNT * value * availability
 
         drop = drops.get((position, r["tier"]), 0.0)
         if r["is_tier_end"] and drop > 0:

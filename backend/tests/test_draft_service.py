@@ -5,8 +5,9 @@ from app.services.draft_service import (
     _adp_implied,
     _assign_tiers,
     _blend,
-    _marginal_multiplier,
+    _lineup_value,
     _recommend_cap,
+    _roster_slots,
     _status_adjust,
     availability_at,
     recommend_picks,
@@ -257,28 +258,77 @@ def _cand(pid, name, position, vor, adp, **extra):
     }
 
 
-class TestMarginalMultiplier:
-    def test_starter_gets_full_value_plus_bonus(self):
-        mult, is_starter = _marginal_multiplier("RB", have=0, starters=2.4)
+# Emeka's league: 1 QB, 1 RB, 2 WR, 1 TE, 2 FLEX, 1 K, 1 DEF
+FLEX_LEAGUE = ["QB", "RB", "WR", "WR", "TE", "FLEX", "FLEX", "K", "DEF", "BN", "BN"]
+
+
+class TestRosterSlots:
+    def test_separates_dedicated_from_flex(self):
+        dedicated, flex, superflex = _roster_slots(FLEX_LEAGUE)
+        assert dedicated == {"QB": 1, "RB": 1, "WR": 2, "TE": 1, "K": 1, "DEF": 1}
+        assert flex == 2
+        assert superflex == 0
+
+    def test_superflex_counted_separately(self):
+        _, _, superflex = _roster_slots(
+            ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "SUPER_FLEX"]
+        )
+        assert superflex == 1
+
+
+class TestLineupValue:
+    def test_open_dedicated_slot_fills_a_starter(self):
+        value, is_starter, _ = _lineup_value(
+            "RB", vor=30.0, proj_points=250.0, held=Counter(),
+            dedicated={"RB": 1}, flex_open=2, superflex_open=0,
+        )
         assert is_starter is True
-        assert mult > 1.0
+        assert value >= 30.0
 
-    def test_depth_decays_below_full_value(self):
-        # The 3rd RB in a 2.4-starter league is bench depth.
-        mult, is_starter = _marginal_multiplier("RB", have=2, starters=2.4)
+    def test_needed_starter_is_floored_even_below_replacement(self):
+        # No RB yet, only a below-replacement RB left — still worth starting.
+        value, is_starter, _ = _lineup_value(
+            "RB", vor=-20.0, proj_points=150.0, held=Counter(),
+            dedicated={"RB": 1}, flex_open=0, superflex_open=0,
+        )
+        assert is_starter is True
+        assert value > 0
+
+    def test_backup_qb_is_heavily_discounted(self):
+        # You already have your QB; a second barely plays.
+        value, is_starter, _ = _lineup_value(
+            "QB", vor=80.0, proj_points=380.0, held=Counter({"QB": 1}),
+            dedicated={"QB": 1}, flex_open=2, superflex_open=0,
+        )
         assert is_starter is False
-        assert 0 < mult < 1.0
+        assert value < 10  # 80 * 0.10
 
-    def test_te_depth_decays_harder_than_rb_depth(self):
-        # You start one TE; RB depth plays through the flex. A surplus TE should
-        # be discounted more aggressively than a surplus RB at the same distance.
-        te_mult, _ = _marginal_multiplier("TE", have=1, starters=1.15)
-        rb_mult, _ = _marginal_multiplier("RB", have=1, starters=1.15)
-        assert te_mult < rb_mult
+    def test_rb_depth_outranks_a_backup_qb_and_te(self):
+        # The exact bug: flex full, so RB is "bench" — but a startable RB must
+        # still beat a 2nd QB and a 2nd TE that can't crack the lineup.
+        held = Counter({"QB": 1, "RB": 2, "WR": 3, "TE": 1})
+        rb, _, _ = _lineup_value(
+            "RB", vor=-25.0, proj_points=210.0, held=held,
+            dedicated={"QB": 1, "RB": 1, "WR": 2, "TE": 1}, flex_open=0, superflex_open=0,
+        )
+        qb, _, _ = _lineup_value(
+            "QB", vor=90.0, proj_points=360.0, held=held,
+            dedicated={"QB": 1, "RB": 1, "WR": 2, "TE": 1}, flex_open=0, superflex_open=0,
+        )
+        te, _, _ = _lineup_value(
+            "TE", vor=45.0, proj_points=200.0, held=held,
+            dedicated={"QB": 1, "RB": 1, "WR": 2, "TE": 1}, flex_open=0, superflex_open=0,
+        )
+        assert rb > qb
+        assert rb > te
 
-    def test_decay_is_monotonic(self):
-        vals = [_marginal_multiplier("TE", have=h, starters=1.15)[0] for h in range(1, 5)]
-        assert vals == sorted(vals, reverse=True)
+    def test_flex_slot_makes_a_second_rb_a_starter(self):
+        value, is_starter, reason = _lineup_value(
+            "RB", vor=20.0, proj_points=200.0, held=Counter({"RB": 1}),
+            dedicated={"RB": 1}, flex_open=2, superflex_open=0,
+        )
+        assert is_starter is True
+        assert "FLEX" in reason
 
 
 class TestRecommendCap:
