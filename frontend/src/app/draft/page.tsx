@@ -69,6 +69,15 @@ interface RecommendResponse {
   recommendations: Recommendation[];
 }
 
+interface LivePick {
+  overall_pick: number;
+  round: number;
+  team_id: string;
+  player_id: string | null;
+  is_you: boolean;
+  made: boolean;
+}
+
 interface LiveDraft {
   status: "not_started" | "in_progress" | "complete" | "unavailable";
   total_picks: number;
@@ -79,6 +88,7 @@ interface LiveDraft {
   drafted_player_ids: string[];
   your_player_ids: string[];
   unmapped_count: number;
+  picks: LivePick[];
 }
 
 type DraftMark = "me" | "gone";
@@ -264,11 +274,30 @@ export default function DraftPage() {
   }, [liveSync, live?.your_slot, slot]);
 
   const board = useMemo(() => data?.players ?? [], [data]);
+  const nameById = useMemo(() => {
+    const m: Record<string, BoardPlayer> = {};
+    for (const p of board) m[p.player_id] = p;
+    return m;
+  }, [board]);
   const myIds = useMemo(
     () => Object.keys(drafted).filter((id) => drafted[id] === "me"),
     [drafted]
   );
   const totalPicked = Object.keys(drafted).length;
+
+  // Most recent completed picks from the live feed, newest first, with names
+  // resolved off the board so we can show "Team 7 took CeeDee Lamb".
+  const livePickFeed = useMemo(() => {
+    if (!liveSync || !live) return [];
+    return live.picks
+      .filter((p) => p.made)
+      .slice(-12)
+      .reverse()
+      .map((p) => ({
+        ...p,
+        player: p.player_id ? nameById[p.player_id] : undefined,
+      }));
+  }, [liveSync, live, nameById]);
 
   // Where you sit right now, and when you're back on the clock
   const { nextPick, followingPick, round } = useMemo(() => {
@@ -617,12 +646,14 @@ export default function DraftPage() {
                       <span className="flex-1 truncate font-semibold">
                         {r.name}
                       </span>
-                      <button
-                        onClick={() => mark(r.player_id, "me")}
-                        className="rounded-md bg-green-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-green-700"
-                      >
-                        Take
-                      </button>
+                      {!liveSync && (
+                        <button
+                          onClick={() => mark(r.player_id, "me")}
+                          className="rounded-md bg-green-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-green-700"
+                        >
+                          Take
+                        </button>
+                      )}
                     </div>
                     <ul className="mt-1 space-y-0.5 pl-7">
                       {r.reasons.map((why) => (
@@ -638,6 +669,41 @@ export default function DraftPage() {
                 )}
               </ul>
             </div>
+
+            {/* Live draft feed — what just came off the board in the real draft */}
+            {liveSync && livePickFeed.length > 0 && (
+              <div className="rounded-xl border border-gray-200 bg-white p-5">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                  Draft feed
+                </h2>
+                <ul className="mt-3 space-y-1.5">
+                  {livePickFeed.map((p) => (
+                    <li
+                      key={p.overall_pick}
+                      className={`flex items-center gap-2 text-sm ${p.is_you ? "font-semibold" : ""}`}
+                    >
+                      <span className="w-10 shrink-0 text-xs text-gray-400">
+                        {p.round}.{String(((p.overall_pick - 1) % teams) + 1).padStart(2, "0")}
+                      </span>
+                      {p.player && (
+                        <span
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded text-[9px] font-bold text-white ${positionColor(p.player.position)}`}
+                        >
+                          {p.player.position}
+                        </span>
+                      )}
+                      <span className="flex-1 truncate">
+                        {p.player?.name ??
+                          (p.player_id ? "(unmatched pick)" : "—")}
+                      </span>
+                      <span className="shrink-0 text-xs text-gray-400">
+                        {p.is_you ? "You" : `Tm ${p.team_id}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="rounded-xl border border-gray-200 bg-white p-5">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
