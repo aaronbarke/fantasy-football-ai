@@ -1,4 +1,38 @@
-from app.services.live_draft_service import _parse_picks
+from app.services.live_draft_service import _parse_picks, build_demo_state
+
+
+def _board(n=60):
+    return [
+        {"player_id": f"p{i}", "name": f"Player {i}", "position": "RB", "adp": float(i + 1)}
+        for i in range(n)
+    ]
+
+
+class TestBuildDemoState:
+    def test_fills_picks_in_snake_order_from_the_top(self):
+        st = build_demo_state(_board(), teams=14, rounds=17, my_slot=5, picks_made=30)
+        assert st["status"] == "in_progress"
+        assert st["picks_made"] == 30
+        assert st["total_picks"] == 238
+        # First overall pick is the best ADP player
+        first = st["picks"][0]
+        assert first["made"] and first["player_id"] == "p0"
+
+    def test_your_slot_picks_are_yours(self):
+        st = build_demo_state(_board(), teams=14, rounds=17, my_slot=5, picks_made=30)
+        # Pick 5 is yours (round 1), then snake back at 24
+        yours = [p for p in st["picks"] if p["is_you"] and p["made"]]
+        assert {p["overall_pick"] for p in yours} == {5, 24}
+        assert len(st["your_player_ids"]) == 2
+
+    def test_on_the_clock_is_the_next_unmade_pick(self):
+        st = build_demo_state(_board(), teams=14, rounds=17, my_slot=5, picks_made=30)
+        assert st["on_the_clock"]["overall_pick"] == 31
+
+    def test_flagged_as_demo(self):
+        st = build_demo_state(_board(), teams=12, rounds=15, my_slot=1, picks_made=0)
+        assert st["demo"] is True
+        assert st["picks_made"] == 0
 
 
 def _slot(overall, team, rnd, round_pick, player_id=-1):

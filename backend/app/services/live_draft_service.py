@@ -76,6 +76,61 @@ def _parse_picks(
     }
 
 
+def build_demo_state(
+    board: list[dict], teams: int, rounds: int, my_slot: int, picks_made: int
+) -> dict:
+    """A synthetic in-progress draft for previewing the live room without a real
+    draft to poll. Fills picks in snake order from the top of the board so the
+    feed, auto-marking, and roster-fill all exercise real player data. Not wired
+    to ESPN — purely a dry run of what draft day will look like.
+    """
+    ordered = [p for p in board if p.get("adp")]
+    ordered.sort(key=lambda p: p["adp"])
+    total = teams * rounds
+
+    picks: list[dict] = []
+    drafted_ids: list[str] = []
+    your_ids: list[str] = []
+    for overall in range(1, total + 1):
+        rnd = (overall - 1) // teams + 1
+        idx = (overall - 1) % teams + 1
+        slot = idx if rnd % 2 == 1 else teams - idx + 1
+        is_you = slot == my_slot
+        made = overall <= picks_made
+        player = ordered[overall - 1] if made and overall - 1 < len(ordered) else None
+        pid = player["player_id"] if player else None
+        if made and pid:
+            drafted_ids.append(pid)
+            if is_you:
+                your_ids.append(pid)
+        picks.append(
+            {
+                "overall_pick": overall,
+                "round": rnd,
+                "round_pick": idx,
+                "team_id": str(slot),
+                "player_id": pid,
+                "is_you": is_you,
+                "made": made,
+            }
+        )
+
+    on_the_clock = next((p for p in picks if not p["made"]), None)
+    return {
+        "status": "in_progress" if picks_made < total else "complete",
+        "total_picks": total,
+        "picks_made": picks_made,
+        "your_team_id": str(my_slot),
+        "your_slot": my_slot,
+        "on_the_clock": on_the_clock,
+        "drafted_player_ids": drafted_ids,
+        "your_player_ids": your_ids,
+        "unmapped_count": 0,
+        "picks": picks,
+        "demo": True,
+    }
+
+
 async def espn_live_draft_state(db, conn: LeagueConnection) -> dict:
     """Current state of the connected ESPN league's draft.
 

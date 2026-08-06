@@ -18,7 +18,7 @@ from app.services.draft_service import (
     replacement_ranks,
     roster_needs,
 )
-from app.services.live_draft_service import espn_live_draft_state
+from app.services.live_draft_service import build_demo_state, espn_live_draft_state
 from app.services.news_service import recent_news_by_player
 from app.utils.security import get_current_user
 
@@ -170,13 +170,40 @@ async def _board_for(
 @router.get("/live")
 async def live_draft(
     connection_id: str,
+    demo_picks: int = Query(default=0, ge=0, le=400),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Live state of the connected league's real draft, for the draft room to
     poll and auto-mark picks. ESPN only — Sleeper support can follow the same
-    shape. Returns a `not_started` shell for platforms without a live feed."""
+    shape. Returns a `not_started` shell for platforms without a live feed.
+
+    `demo_picks` > 0 returns a synthetic in-progress draft (that many picks made)
+    for previewing draft day without a live ESPN draft to poll."""
     conn = await _get_conn(db, user, connection_id)
+
+    if demo_picks:
+        season = get_settings().current_season
+        scoring = conn.scoring_type if conn.scoring_type in SCORING_FORMATS else "ppr"
+        teams = await _league_size(db, conn)
+        rounds = (
+            len([s for s in conn.roster_positions if s.upper() not in ("IR", "TAXI")])
+            if conn.roster_positions
+            else DEFAULT_ROUNDS
+        )
+        board = await compute_draft_board(
+            db,
+            season=season,
+            scoring=scoring,
+            league_size=teams,
+            roster_positions=conn.roster_positions,
+        )
+        my_slot = 5
+        state = await espn_live_draft_state(db, conn)
+        if state.get("your_slot"):
+            my_slot = state["your_slot"]
+        return build_demo_state(board, teams, rounds, my_slot, demo_picks)
+
     if conn.platform != "espn":
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
