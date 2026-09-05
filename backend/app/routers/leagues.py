@@ -305,14 +305,30 @@ async def get_matchup(
     db: AsyncSession = Depends(get_db),
 ):
     conn = await _get_user_connection(db, user, connection_id)
+    # Prefer the current/upcoming week (earliest with no points on the board).
+    # Before Week 1 that's Week 1; mid-season it's whichever week is currently
+    # live. Only fall back to the max week (final week already scored) so we
+    # never 404 when the season is over.
     latest_week = (
         await db.execute(
             select(Matchup.week)
-            .where(Matchup.connection_id == conn.id)
-            .order_by(Matchup.week.desc())
+            .where(
+                Matchup.connection_id == conn.id,
+                (Matchup.team_a_points == 0) & (Matchup.team_b_points == 0),
+            )
+            .order_by(Matchup.week.asc())
             .limit(1)
         )
     ).scalar_one_or_none()
+    if latest_week is None:
+        latest_week = (
+            await db.execute(
+                select(Matchup.week)
+                .where(Matchup.connection_id == conn.id)
+                .order_by(Matchup.week.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
     if latest_week is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No matchup data — sync the league")
 

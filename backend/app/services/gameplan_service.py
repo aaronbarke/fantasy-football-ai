@@ -22,6 +22,11 @@ FLEX_ELIGIBLE = {
     "OP": {"QB", "RB", "WR", "TE"},
 }
 DEFAULT_LINEUP = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX"]
+# League-average starting K/DEF weekly output in PPR. Rough baseline so the
+# matchup preview and gameplan totals include those slots — projecting them
+# individually is a fool's errand (K/DST scoring is dominated by touchdown
+# variance neither our history nor an external model handles cleanly).
+KDEF_BASELINE = 8.0
 
 # A start/sit closer than this is a near-toss-up — we still recommend the higher
 # projection, but flag it as close and surface the deciding contextual factor
@@ -94,6 +99,14 @@ async def _player_cards(
     cards = []
     for p in players:
         proj = projections.get(p.id) or {}
+        # K/DEF are excluded from the recency-weighted skill-position model in
+        # compute_projections — those positions are too noisy for it. Fall back
+        # to a flat baseline (league-average starter output) so the matchup
+        # preview shows something instead of "No projection", and both sides'
+        # totals are comparable when both have a K/DEF slot.
+        projected = proj.get("projected")
+        if projected is None and p.position in ("K", "DEF"):
+            projected = KDEF_BASELINE
         cards.append(
             {
                 "id": p.id,
@@ -101,7 +114,7 @@ async def _player_cards(
                 "position": p.position,
                 "team": p.team,
                 "injury_status": p.injury_status,
-                "projected": proj.get("projected"),
+                "projected": projected,
                 "floor": proj.get("floor"),
                 "ceiling": proj.get("ceiling"),
                 "confidence": proj.get("confidence"),
@@ -187,16 +200,21 @@ async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dic
     if not conn.team_id:
         return {"status": "no_team"}
 
+    # Prefer the current/upcoming week (earliest with no points scored) — same
+    # logic as the /matchup endpoint. Fall back to the latest week if every one
+    # is already played, so the season-end recap still works.
     matchups = (
         await db.execute(
             select(Matchup)
             .where(Matchup.connection_id == conn.id)
-            .order_by(Matchup.week.desc())
+            .order_by(Matchup.week.asc())
         )
     ).scalars().all()
-    m = next((x for x in matchups if conn.team_id in (x.team_a_id, x.team_b_id)), None)
-    if m is None:
+    mine = [x for x in matchups if conn.team_id in (x.team_a_id, x.team_b_id)]
+    if not mine:
         return {"status": "no_matchup"}
+    unplayed = [x for x in mine if not (x.team_a_points or x.team_b_points)]
+    m = unplayed[0] if unplayed else mine[-1]
 
     async def _roster(team_id: str | None) -> Roster | None:
         if not team_id:
@@ -319,18 +337,20 @@ async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:
 
     my_total, my_var = _team_totals(lineup, projections)
 
-    # Opponent projection from this week's matchup, if synced
+    # Opponent projection from this week's matchup, if synced. Prefer the
+    # earliest unplayed week — pre-season that's Week 1, mid-season it follows
+    # the live week — so the game plan doesn't stubbornly show the final week.
     opponent = None
     matchups = (
         await db.execute(
             select(Matchup)
             .where(Matchup.connection_id == conn.id)
-            .order_by(Matchup.week.desc())
+            .order_by(Matchup.week.asc())
         )
     ).scalars().all()
-    m = next(
-        (x for x in matchups if conn.team_id in (x.team_a_id, x.team_b_id)), None
-    )
+    mine = [x for x in matchups if conn.team_id in (x.team_a_id, x.team_b_id)]
+    unplayed = [x for x in mine if not (x.team_a_points or x.team_b_points)]
+    m = unplayed[0] if unplayed else (mine[-1] if mine else None)
     if m:
         opp_id = m.team_b_id if m.team_a_id == conn.team_id else m.team_a_id
         opp_roster = (

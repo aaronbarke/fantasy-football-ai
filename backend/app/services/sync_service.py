@@ -194,6 +194,8 @@ async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
     )
     try:
         data = await client.get_rosters()
+        schedule_data = await client.get_matchups()
+        free_agents_data = await client.get_free_agents(limit=200)
     finally:
         await client.close()
 
@@ -242,6 +244,59 @@ async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
         roster.ties = record.get("ties", 0)
         roster.points_for = record.get("pointsFor", 0) or 0
         roster.points_against = record.get("pointsAgainst", 0) or 0
+
+    # Schedule: ESPN publishes the full 14-week matchup grid at league creation,
+    # so as soon as the draft ends we can populate the Matchup page with every
+    # upcoming opponent. Wipe-then-write is simpler and safe here because the
+    # league's schedule doesn't change mid-season (unlike Sleeper's per-week
+    # matchup_id pairing).
+    schedule = (schedule_data or {}).get("schedule") or []
+    await db.execute(delete(Matchup).where(Matchup.connection_id == conn.id))
+    for entry in schedule:
+        week = entry.get("matchupPeriodId")
+        away = entry.get("away") or {}
+        home = entry.get("home") or {}
+        away_id = away.get("teamId")
+        home_id = home.get("teamId")
+        if week is None or away_id is None or home_id is None:
+            continue  # bye-week filler or malformed row — skip
+        db.add(
+            Matchup(
+                connection_id=conn.id,
+                week=int(week),
+                team_a_id=str(away_id),
+                team_b_id=str(home_id),
+                team_a_points=away.get("totalPoints") or 0,
+                team_b_points=home.get("totalPoints") or 0,
+            )
+        )
+
+    # Waivers / free agents. ESPN sorts by ownership so we pick the most
+    # relevant 200 up front; we then map ESPN player ids to our canonical
+    # Sleeper ids and drop anyone already on a roster in this league (ESPN's
+    # feed usually excludes them anyway, but doubling up is cheap insurance).
+    await db.execute(
+        delete(AvailablePlayer).where(AvailablePlayer.connection_id == conn.id)
+    )
+    rostered_ids = set()
+    for team in data.get("teams", []):
+        espn_ids, _ = ESPNClient.parse_roster_entries(team)
+        rostered_ids.update(espn_map[e] for e in espn_ids if e in espn_map)
+    for entry in (free_agents_data or {}).get("players", []):
+        espn_pid = str(entry.get("id") or (entry.get("player") or {}).get("id") or "")
+        pid = espn_map.get(espn_pid)
+        if not pid or pid in rostered_ids:
+            continue
+        po = entry.get("player") or {}
+        pct = (po.get("ownership") or {}).get("percentOwned")
+        db.add(
+            AvailablePlayer(
+                connection_id=conn.id,
+                player_id=pid,
+                trending_count=int(pct) if pct is not None else None,
+                recent_ppr_avg=None,
+            )
+        )
 
     conn.last_synced_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.commit()
