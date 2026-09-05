@@ -62,7 +62,7 @@ export default function WaiversPage() {
         {isLoading && <p className="mt-6 text-sm text-gray-400">Loading…</p>}
         {!isLoading && filtered.length === 0 && (
           <p className="mt-6 text-sm text-gray-400">
-            No available players found — sync your league from the dashboard.
+            No available players found. Sync your league from the dashboard.
           </p>
         )}
 

@@ -20,12 +20,12 @@ const features = [
   {
     icon: Bot,
     title: "AI that knows your league",
-    body: "Connected to your real roster, matchups, and scoring settings — not generic takes. Every call is graded against what actually happened.",
+    body: "Wired into your real roster, matchups, and scoring settings, not generic takes. Every call it makes gets graded against what actually happened.",
   },
   {
     icon: TrendingUp,
     title: "Projection engine",
-    body: "Two seasons of weighted production, defense-vs-position matchups, and Vegas totals — with a floor and ceiling on every player.",
+    body: "Two seasons of weighted production, defense-vs-position matchups, and Vegas totals. Every player carries a floor and a ceiling.",
   },
   {
     icon: ArrowLeftRight,
@@ -35,12 +35,12 @@ const features = [
   {
     icon: Zap,
     title: "Betting edge",
-    body: "Live line shopping across US sportsbooks — best price on every side, ranked by how much the books disagree.",
+    body: "Live line shopping across US sportsbooks. Best price on every side, ranked by how much the books disagree.",
   },
   {
     icon: CloudSun,
     title: "Game-day conditions",
-    body: "Wind, rain, and temperature at every stadium — domes included — folded into every recommendation.",
+    body: "Wind, rain, and temperature at every stadium, domes included, folded into every recommendation.",
   },
 ];
 
@@ -62,7 +62,7 @@ export default function Landing() {
           Fantasy Football <span className="text-green-400">AI</span>
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-green-100/80">
-          Your league, your roster, real data — an AI co-manager that builds your
+          Your league, your roster, real data. An AI co-manager that builds your
           lineup, grades your trades, and shows its work on every call.
         </p>
         <div className="mt-10 flex justify-center gap-4">
@@ -95,10 +95,10 @@ export default function Landing() {
           {features.map((f) => (
             <div
               key={f.title}
-              className={`rounded-xl border p-6 transition-colors ${
+              className={`rounded-xl border p-6 transition-all duration-200 hover:-translate-y-1 ${
                 f.highlight
-                  ? "border-green-400/40 bg-green-500/10 hover:bg-green-500/15"
-                  : "border-white/10 bg-white/5 hover:bg-white/10"
+                  ? "border-green-400/40 bg-green-500/10 hover:bg-green-500/15 hover:shadow-lg hover:shadow-green-500/10"
+                  : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10 hover:shadow-lg hover:shadow-black/20"
               }`}
             >
               <f.icon className="h-8 w-8 text-green-400" />

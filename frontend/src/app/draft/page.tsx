@@ -170,7 +170,7 @@ function EspnEdgeBadge({ edge }: { edge: number | null }) {
   if (edge == null || edge < 18) return null;
   return (
     <span
-      title={`Sharp drafters take him ~${Math.round(edge)} picks earlier than ESPN — falls to you if your league drafts off ESPN`}
+      title={`Sharp drafters take him ~${Math.round(edge)} picks earlier than ESPN, so he falls to you if your league drafts off ESPN`}
       className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"
     >
       ESPN value +{Math.round(edge)}
@@ -204,12 +204,12 @@ function CookieExpiredBanner() {
       <AlertTriangle className="h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-red-800 dark:text-red-300">
-          ESPN rejected your login — your cookies have expired
+          ESPN rejected your login. Your cookies have expired
         </p>
         <p className="mt-0.5 text-xs text-red-700 dark:text-red-400">
           Live sync can&apos;t read your draft until you reconnect with fresh
-          espn_s2 and SWID cookies. Picks won&apos;t auto-mark until then — you can
-          keep drafting with the manual “My pick / Gone” buttons in the meantime.
+          espn_s2 and SWID cookies. Picks won&apos;t auto-mark until then, but you
+          can keep drafting with the manual “My pick / Gone” buttons in the meantime.
         </p>
       </div>
       <Link
@@ -475,7 +475,7 @@ export default function DraftPage() {
             <h1 className="text-2xl font-bold">Draft room</h1>
             <p className="mt-1 text-sm text-gray-500">
               Consensus ADP from ESPN and real mock drafts, our own season
-              projections, and value over replacement — {data?.scoring ?? "ppr"}{" "}
+              projections, and value over replacement. {data?.scoring ?? "ppr"}{" "}
               scoring, {data?.league_size ?? teams}-team.
             </p>
           </div>
@@ -532,7 +532,7 @@ export default function DraftPage() {
             {liveSync && live && (
               <span className="text-sm text-gray-600">
                 {live.status === "not_started" &&
-                  "Draft hasn't started — picks will appear here as they happen."}
+                  "Draft hasn't started. Picks will appear here as they happen."}
                 {live.status === "in_progress" &&
                   `Live · ${live.picks_made}/${live.total_picks} picked` +
                     (live.on_the_clock
@@ -542,13 +542,13 @@ export default function DraftPage() {
                       : "")}
                 {live.status === "complete" && "Draft complete."}
                 {live.status === "unavailable" &&
-                  "Couldn't reach the ESPN draft — check your league is synced."}
+                  "Couldn't reach the ESPN draft. Check that your league is synced."}
               </span>
             )}
             {demoMode && live && (
               <span className="text-sm text-gray-600">
                 Preview · {live.picks_made}/{live.total_picks} picked
-                {live.on_the_clock?.is_you ? " · you're on the clock" : ""} — this
+                {live.on_the_clock?.is_you ? " · you're on the clock" : ""}. This
                 is a dry run, not your real draft.
               </span>
             )}
@@ -615,7 +615,7 @@ export default function DraftPage() {
             {externalSync && liveExt && (
               <span className="text-sm text-gray-600 dark:text-gray-300">
                 {liveExt.status === "not_started" &&
-                  "Draft hasn't started yet — watching for picks."}
+                  "Draft hasn't started yet. Watching for picks."}
                 {liveExt.status === "in_progress" &&
                   `Live · ${liveExt.picks_made}/${liveExt.total_picks} picked` +
                     (liveExt.on_the_clock
@@ -623,7 +623,7 @@ export default function DraftPage() {
                       : "")}
                 {liveExt.status === "complete" && "Draft complete."}
                 {liveExt.status === "unavailable" &&
-                  "Couldn't reach that ESPN draft — check the league ID."}
+                  "Couldn't reach that ESPN draft. Check the league ID."}
               </span>
             )}
             {externalSync && (liveExt?.unmapped_count ?? 0) > 0 && (
@@ -635,7 +635,7 @@ export default function DraftPage() {
           {!externalSync && (
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
               Paste the league ID from any ESPN draft URL (or the full URL). Works
-              with the ESPN Mock Draft Lobby — join a lobby mock, copy the league
+              with the ESPN Mock Draft Lobby: join a lobby mock, copy the league
               ID from the URL bar, and paste it here to watch picks sync live.
             </p>
           )}
@@ -723,7 +723,7 @@ export default function DraftPage() {
             )}
             {!isLoading && board.length === 0 && (
               <p className="mt-6 text-sm text-gray-400">
-                No draft data yet — run the draft-data sync to pull ADP and
+                No draft data yet. Run the draft-data sync to pull ADP and
                 projections.
               </p>
             )}
@@ -776,7 +776,7 @@ export default function DraftPage() {
                           )}
                           {p.roster_status === "free_agent" && (
                             <span
-                              title="No NFL team — projection is market-implied only"
+                              title="No NFL team, so the projection is market-implied only"
                               className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-bold text-gray-600 dark:bg-gray-500/20 dark:text-gray-300"
                             >
                               FA
@@ -787,7 +787,7 @@ export default function DraftPage() {
                               href={news[0].url}
                               target="_blank"
                               rel="noreferrer"
-                              title={`${news[0].headline} — ${timeAgo(news[0].published_at)}`}
+                              title={`${news[0].headline} · ${timeAgo(news[0].published_at)}`}
                               className="text-gray-400 hover:text-green-600"
                             >
                               <Newspaper className="h-3.5 w-3.5" />

@@ -35,7 +35,7 @@ export default function RosterPage() {
         {isLoading && <p className="mt-4 text-sm text-gray-400">Loading…</p>}
         {!isLoading && !roster && (
           <p className="mt-4 text-sm text-gray-400">
-            No roster found — sync your league from the dashboard.
+            No roster found. Sync your league from the dashboard.
           </p>
         )}
 
@@ -43,7 +43,7 @@ export default function RosterPage() {
           roster.starters.length === 0 &&
           roster.bench.length === 0 && (
             <p className="mt-4 text-sm text-gray-400">
-              Your roster is empty — your league hasn&apos;t drafted yet. Check
+              Your roster is empty. Your league hasn&apos;t drafted yet. Check
               back after draft day and hit Sync.
             </p>
           )}

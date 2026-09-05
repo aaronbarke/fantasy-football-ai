@@ -140,7 +140,7 @@ export default function LoginPage() {
               type="button"
               onClick={() =>
                 setError(
-                  "Google sign-in isn't set up yet — add a Google Client ID (see SETUP_GOOGLE_OAUTH.md)."
+                  "Google sign-in isn't set up yet. Add a Google Client ID (see SETUP_GOOGLE_OAUTH.md)."
                 )
               }
               className="flex w-full items-center justify-center gap-2 rounded-full border border-gray-300 bg-white py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -211,7 +211,7 @@ export default function LoginPage() {
             Just exploring? Try the demo
           </button>
           <p className="mt-2 text-center text-xs text-gray-400">
-            Jump in instantly — no account needed.
+            Jump in instantly. No account needed.
           </p>
         </div>
       </div>

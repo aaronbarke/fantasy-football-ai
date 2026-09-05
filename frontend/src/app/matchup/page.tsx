@@ -115,7 +115,7 @@ export default function MatchupPage() {
         {isLoading && <p className="mt-6 text-sm text-gray-400">Projecting the matchup…</p>}
         {!isLoading && !ready && (
           <p className="mt-6 text-sm text-gray-400">
-            No matchup data yet — projections appear once your league has rosters.
+            No matchup data yet. Projections appear once your league has rosters.
             Try Sync on the dashboard after draft day.
           </p>
         )}

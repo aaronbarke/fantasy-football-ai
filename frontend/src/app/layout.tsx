@@ -6,7 +6,7 @@ import PwaRegister from "@/components/PwaRegister";
 export const metadata: Metadata = {
   title: "Fantasy Football AI",
   description:
-    "An AI assistant that knows your fantasy league as well as you do — and never forgets to check the injury report.",
+    "An AI assistant that knows your fantasy league as well as you do, and never forgets to check the injury report.",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "FFAI", statusBarStyle: "default" },
 };

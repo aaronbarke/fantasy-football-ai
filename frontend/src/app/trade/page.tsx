@@ -191,7 +191,7 @@ export default function TradePage() {
         <h1 className="text-2xl font-bold">Trade analyzer</h1>
         <p className="mt-1 text-sm text-gray-500">
           Build both sides of a trade and get a graded AI verdict. Each player
-          gets a value score from Value Over Replacement — updated as the season plays out.
+          gets a value score from Value Over Replacement, updated as the season plays out.
         </p>
 
         <div className="mt-6 grid gap-6 md:grid-cols-2">

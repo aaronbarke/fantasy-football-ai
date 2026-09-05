@@ -185,7 +185,7 @@ export default function DashboardPage() {
               <button
                 onClick={refreshStats}
                 disabled={refreshingStats}
-                title="Re-pull this week's NFL stats — refreshes values, projections & schedule strength"
+                title="Re-pull this week's NFL stats. Refreshes values, projections, and schedule strength"
                 className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
               >
                 <Database className={`h-4 w-4 ${refreshingStats ? "animate-pulse" : ""}`} />
@@ -231,7 +231,7 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="mt-6 rounded-2xl border border-gray-200/70 bg-white px-6 py-8 text-center dark:border-gray-800/70">
-            <p className="text-sm text-gray-400">No roster yet — try syncing your league.</p>
+            <p className="text-sm text-gray-400">No roster yet. Try syncing your league.</p>
           </div>
         )}
 
@@ -372,7 +372,7 @@ export default function DashboardPage() {
               ) : (
                 <div className="mt-4 flex items-center gap-2 text-sm text-gray-400">
                   <Activity className="h-4 w-4" />
-                  All clear — no injuries on your roster.
+                  All clear. No injuries on your roster.
                 </div>
               )}
             </div>

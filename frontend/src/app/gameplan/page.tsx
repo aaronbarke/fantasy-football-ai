@@ -183,7 +183,7 @@ export default function GamePlanPage() {
               Weekly game plan
             </h1>
             <p className="mt-1 text-sm text-gray-500">
-              Model-optimal lineup, projected score, and win odds — built from
+              Model-optimal lineup, projected score, and win odds, built from
               projections, matchups, and Vegas lines.
             </p>
           </div>
@@ -266,7 +266,7 @@ export default function GamePlanPage() {
                       at {s.slot}
                       {s.close && (
                         <span className="ml-1 text-xs font-medium text-amber-700/80 dark:text-amber-200/70">
-                          — narrow{s.reason ? `, edge: ${s.reason}` : " call"}
+                          (narrow{s.reason ? `, edge: ${s.reason}` : " call"})
                         </span>
                       )}
                     </li>

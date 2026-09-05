@@ -97,7 +97,7 @@ export default function BettingPage() {
           <div>
             <h1 className="text-2xl font-bold">Betting edge</h1>
             <p className="mt-1 text-sm text-gray-500">
-              Live lines across regulated US sportsbooks — best price highlighted,
+              Live lines across regulated US sportsbooks. Best price highlighted,
               guaranteed-profit arbitrage flagged, then sorted by how much the
               books disagree (line-shopping value).
             </p>
@@ -115,13 +115,13 @@ export default function BettingPage() {
         {isLoading && <p className="mt-6 text-sm text-gray-400">Pulling live lines…</p>}
         {error ? (
           <p className="mt-6 text-sm text-gray-400">
-            No lines available — the books haven&apos;t posted odds yet (common in
+            No lines available. The books haven&apos;t posted odds yet (common in
             the offseason), or the Odds API key is missing.
           </p>
         ) : null}
         {!isLoading && !error && games.length === 0 && (
           <p className="mt-6 text-sm text-gray-400">
-            No games with posted lines right now — check back closer to game week.
+            No games with posted lines right now. Check back closer to game week.
           </p>
         )}
 
@@ -271,7 +271,7 @@ export default function BettingPage() {
         </div>
 
         <p className="mt-8 text-center text-xs text-gray-400">
-          Lines refresh every 10 minutes. For entertainment and analysis only —
+          Lines refresh every 10 minutes. For entertainment and analysis only,
           not financial advice. 21+ where applicable.
         </p>
       </main>

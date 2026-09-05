@@ -195,7 +195,7 @@ export default function MockDraftPage() {
         <main className="mx-auto max-w-6xl px-4 py-8">
           <h1 className="text-2xl font-bold">Mock draft</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Practice against bots that draft near real consensus ADP — scattered
+            Practice against bots that draft near real consensus ADP, scattered
             by how much actual drafters disagree about each player.
           </p>
           <div className="mt-6 max-w-md rounded-xl border border-gray-200 bg-white p-5">
@@ -307,7 +307,7 @@ export default function MockDraftPage() {
                   </span>
                 ) : state.is_my_turn ? (
                   <span className="flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1 text-sm font-semibold text-white">
-                    <Zap className="h-4 w-4" /> You&apos;re on the clock — pick #
+                    <Zap className="h-4 w-4" /> You&apos;re on the clock · pick #
                     {state.on_the_clock}
                   </span>
                 ) : (
@@ -353,7 +353,7 @@ export default function MockDraftPage() {
                   You finished {results.your_rank} of {results.teams}
                 </h2>
                 <p className="mt-1 text-sm text-gray-600">
-                  {results.your_total_vor} total value over replacement — league
+                  {results.your_total_vor} total value over replacement, league
                   average {results.league_average_vor}.
                 </p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
