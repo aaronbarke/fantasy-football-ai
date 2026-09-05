@@ -422,7 +422,9 @@ export default function MockDraftPage() {
                         {p.position}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold">{p.name}</p>
+                        <p className="flex items-center gap-1.5 truncate text-sm font-semibold">
+                          {p.name}
+                        </p>
                         <p className="truncate text-xs text-gray-500">
                           {p.team ?? "FA"}
                           {p.bye_week ? ` · bye ${p.bye_week}` : ""}

@@ -89,7 +89,17 @@ export default function Navbar() {
             FF<span className="text-gray-900 dark:text-gray-100">AI</span>
           </Link>
 
-          {/* League switcher */}
+          {/* League switcher — or, when the account has no leagues yet, a
+              direct way to connect one (otherwise a zero-league account has no
+              entry point to /connect at all). */}
+          {leagues && leagues.length === 0 && (
+            <Link
+              href="/connect"
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-green-700 hover:bg-gray-50 dark:border-gray-700 dark:text-green-400 dark:hover:bg-gray-800"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add league
+            </Link>
+          )}
           {leagues && leagues.length > 0 && (
             <div className="relative">
               <button

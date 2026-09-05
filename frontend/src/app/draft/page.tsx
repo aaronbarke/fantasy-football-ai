@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import Navbar from "@/components/Navbar";
 import { api } from "@/lib/api";
@@ -13,6 +14,7 @@ import {
   Newspaper,
   Radio,
   Play,
+  AlertTriangle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -86,7 +88,7 @@ interface LivePick {
 }
 
 interface LiveDraft {
-  status: "not_started" | "in_progress" | "complete" | "unavailable";
+  status: "not_started" | "in_progress" | "complete" | "unavailable" | "auth_expired";
   total_picks: number;
   picks_made: number;
   your_team_id: string | null;
@@ -193,6 +195,33 @@ function AvailabilityPill({ pct }: { pct: number }) {
   );
 }
 
+/** Shown when ESPN rejects our stored cookies (401/403). Mid-draft this is the
+ * one failure that needs the user to act — the fix (reconnect with fresh
+ * espn_s2/SWID) lives on /connect, so link straight there. */
+function CookieExpiredBanner() {
+  return (
+    <div className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-red-300 bg-red-50 p-4 dark:border-red-500/40 dark:bg-red-500/10">
+      <AlertTriangle className="h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+          ESPN rejected your login — your cookies have expired
+        </p>
+        <p className="mt-0.5 text-xs text-red-700 dark:text-red-400">
+          Live sync can&apos;t read your draft until you reconnect with fresh
+          espn_s2 and SWID cookies. Picks won&apos;t auto-mark until then — you can
+          keep drafting with the manual “My pick / Gone” buttons in the meantime.
+        </p>
+      </div>
+      <Link
+        href="/connect"
+        className="shrink-0 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700"
+      >
+        Reconnect league
+      </Link>
+    </div>
+  );
+}
+
 export default function DraftPage() {
   const { league } = useLeague({ requireLeague: false });
   const [manualDrafted, setManualDrafted] = useState<Record<string, DraftMark>>({});
@@ -204,6 +233,9 @@ export default function DraftPage() {
   const [loaded, setLoaded] = useState(false);
   const [liveSync, setLiveSync] = useState(false);
   const [demoPicks, setDemoPicks] = useState(0); // 0 = off; >0 = preview in progress
+  const [externalId, setExternalId] = useState(""); // ESPN league ID for external sync
+  const [externalInput, setExternalInput] = useState(""); // controlled input
+  const externalSync = externalId.length > 0;
 
   useEffect(() => {
     try {
@@ -237,21 +269,32 @@ export default function DraftPage() {
 
   const isEspn = league?.platform === "espn";
   const demoMode = demoPicks > 0;
-  // Whenever the board is driven externally — real ESPN sync or the preview.
-  const liveActive = liveSync || demoMode;
+  // Whenever the board is driven externally — real ESPN sync, preview, or external ID sync.
+  const liveActive = liveSync || demoMode || externalSync;
 
   // Poll the real ESPN draft while live sync is on (or replay the synthetic
   // preview). Its picks become the source of truth for what's off the board.
-  const { data: live } = useQuery({
+  const { data: liveConn } = useQuery({
     queryKey: ["liveDraft", league?.id, demoMode ? demoPicks : "real"],
     queryFn: () =>
       api<LiveDraft>(
         `/api/draft/live?connection_id=${league!.id}` +
           (demoMode ? `&demo_picks=${demoPicks}` : "")
       ),
-    enabled: liveActive && !!league?.id && (isEspn || demoMode),
+    enabled: !externalSync && liveActive && !!league?.id && (isEspn || demoMode),
     refetchInterval: demoMode ? false : 6000,
   });
+
+  // External sync — poll any ESPN draft by raw league ID (mock lobby, etc.)
+  const { data: liveExt } = useQuery({
+    queryKey: ["liveDraftExternal", externalId],
+    queryFn: () =>
+      api<LiveDraft>(`/api/draft/live-external?espn_league_id=${externalId}`),
+    enabled: externalSync,
+    refetchInterval: 6000,
+  });
+
+  const live = externalSync ? liveExt : liveConn;
 
   // Advance the preview a couple of picks at a time so the room plays out.
   useEffect(() => {
@@ -278,7 +321,7 @@ export default function DraftPage() {
     queryKey: ["draftBoard", league?.id],
     queryFn: () =>
       api<BoardResponse>(
-        `/api/draft/board?limit=300${league ? `&connection_id=${league.id}` : ""}`
+        `/api/draft/board?limit=450${league ? `&connection_id=${league.id}` : ""}`
       ),
     staleTime: 30 * 60_000,
   });
@@ -298,11 +341,18 @@ export default function DraftPage() {
   }, [liveActive, live?.your_slot, slot]);
 
   const board = useMemo(() => data?.players ?? [], [data]);
+  // Name/position lookup for the feed and your-roster panel. Includes the
+  // late-round K/DEF pool (they live on a separate board), so a drafted kicker
+  // or defense resolves to a name instead of reading "(unmatched pick)".
   const nameById = useMemo(() => {
-    const m: Record<string, BoardPlayer> = {};
+    const m: Record<
+      string,
+      Pick<BoardPlayer, "player_id" | "name" | "position" | "team" | "bye_week">
+    > = {};
     for (const p of board) m[p.player_id] = p;
+    for (const p of data?.late_round ?? []) m[p.player_id] = p;
     return m;
-  }, [board]);
+  }, [board, data]);
   const myIds = useMemo(
     () => Object.keys(drafted).filter((id) => drafted[id] === "me"),
     [drafted]
@@ -336,10 +386,41 @@ export default function DraftPage() {
   }, [teams, slot, totalPicked]);
 
   const available = board.filter((p) => !drafted[p.player_id]);
-  const filtered = available.filter(
-    (p) => filter === "ALL" || p.position === filter
+  const filtered = useMemo(
+    () => available.filter((p) => filter === "ALL" || p.position === filter),
+    [available, filter]
   );
-  const myPlayers = board.filter((p) => drafted[p.player_id] === "me");
+  // When live/preview, each of your picks carries the round it was made in — so
+  // the roster can read in true draft order instead of a jumble.
+  const myPickRound = useMemo(() => {
+    const m: Record<string, { round: number; overall: number }> = {};
+    if (liveActive && live) {
+      for (const p of live.picks) {
+        if (p.is_you && p.made && p.player_id) {
+          m[p.player_id] = { round: p.round, overall: p.overall_pick };
+        }
+      }
+    }
+    return m;
+  }, [liveActive, live]);
+
+  // Your roster — resolved through nameById so drafted K/DEF (not on the main
+  // board) still appear alongside your offense picks. Sorted into draft order
+  // when we know it, so "which round did I take him" is obvious at a glance.
+  const myPlayers = useMemo(() => {
+    const cards = Object.keys(drafted)
+      .filter((id) => drafted[id] === "me")
+      .map((id) => nameById[id])
+      .filter(Boolean);
+    if (Object.keys(myPickRound).length) {
+      return [...cards].sort(
+        (a, b) =>
+          (myPickRound[a.player_id]?.overall ?? 1e9) -
+          (myPickRound[b.player_id]?.overall ?? 1e9)
+      );
+    }
+    return cards;
+  }, [drafted, nameById, myPickRound]);
 
   const { data: rec, isFetching: recLoading } = useQuery({
     queryKey: ["draftRecommend", league?.id, myIds.join(","), totalPicked, teams, slot],
@@ -419,7 +500,7 @@ export default function DraftPage() {
                 : "border-gray-200 bg-white"
             }`}
           >
-            {isEspn && (
+            {isEspn && !externalSync && (
               <button
                 onClick={() => {
                   setDemoPicks(0);
@@ -435,7 +516,7 @@ export default function DraftPage() {
                 {liveSync ? "Live sync on" : "Sync my ESPN draft"}
               </button>
             )}
-            {!liveSync && (
+            {!liveSync && !externalSync && (
               <button
                 onClick={() => setDemoPicks((p) => (p > 0 ? 0 : 1))}
                 className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold ${
@@ -478,6 +559,87 @@ export default function DraftPage() {
             )}
           </div>
         )}
+
+        {/* Expired-cookie banner — applies to either sync path (live is the
+            merged connected/external state). This is the one mid-draft failure
+            the user has to act on, so it gets a loud banner, not an inline note. */}
+        {liveActive && live?.status === "auth_expired" && <CookieExpiredBanner />}
+
+        {/* External ESPN sync — paste any ESPN league ID to follow that draft */}
+        <div
+          className={`mt-5 rounded-xl border p-4 ${
+            externalSync
+              ? "border-indigo-300 bg-indigo-50 dark:border-indigo-500/40 dark:bg-indigo-500/5"
+              : "border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              Sync any ESPN draft
+            </span>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const raw = externalInput.trim();
+                const idMatch = raw.match(/leagueId=(\d+)/);
+                setExternalId(idMatch ? idMatch[1] : raw);
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                placeholder="ESPN league ID or URL"
+                value={externalInput}
+                onChange={(e) => setExternalInput(e.target.value)}
+                disabled={externalSync}
+                className="w-56 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm placeholder:text-gray-400 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+              />
+              {!externalSync ? (
+                <button
+                  type="submit"
+                  disabled={!externalInput.trim()}
+                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  Sync
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setExternalId(""); setExternalInput(""); }}
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700"
+                >
+                  Disconnect
+                </button>
+              )}
+            </form>
+            {externalSync && liveExt && (
+              <span className="text-sm text-gray-600 dark:text-gray-300">
+                {liveExt.status === "not_started" &&
+                  "Draft hasn't started yet — watching for picks."}
+                {liveExt.status === "in_progress" &&
+                  `Live · ${liveExt.picks_made}/${liveExt.total_picks} picked` +
+                    (liveExt.on_the_clock
+                      ? ` · pick #${liveExt.on_the_clock.overall_pick} on the clock`
+                      : "")}
+                {liveExt.status === "complete" && "Draft complete."}
+                {liveExt.status === "unavailable" &&
+                  "Couldn't reach that ESPN draft — check the league ID."}
+              </span>
+            )}
+            {externalSync && (liveExt?.unmapped_count ?? 0) > 0 && (
+              <span className="text-xs text-amber-600">
+                {liveExt!.unmapped_count} pick(s) not matched to our player pool
+              </span>
+            )}
+          </div>
+          {!externalSync && (
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              Paste the league ID from any ESPN draft URL (or the full URL). Works
+              with the ESPN Mock Draft Lobby — join a lobby mock, copy the league
+              ID from the URL bar, and paste it here to watch picks sync live.
+            </p>
+          )}
+        </div>
 
         {/* Draft position */}
         <div className="mt-5 flex flex-wrap items-center gap-4 rounded-xl border border-gray-200 bg-white p-4">
@@ -775,6 +937,11 @@ export default function DraftPage() {
               <ul className="mt-3 space-y-1.5">
                 {myPlayers.map((p) => (
                   <li key={p.player_id} className="flex items-center gap-2 text-sm">
+                    {myPickRound[p.player_id] && (
+                      <span className="w-7 shrink-0 text-[10px] font-semibold text-gray-400">
+                        R{myPickRound[p.player_id].round}
+                      </span>
+                    )}
                     <span
                       className={`flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold text-white ${positionColor(p.position)}`}
                     >

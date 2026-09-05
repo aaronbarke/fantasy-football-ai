@@ -29,7 +29,11 @@ from collections import Counter, defaultdict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Player, PlayerDraftProfile, PlayerStatsWeekly
+from app.models import (
+    Player,
+    PlayerDraftProfile,
+    PlayerStatsWeekly,
+)
 from app.services.projection_service import _erf
 from app.services.value_service import (
     RECENT_WINDOW,
@@ -135,9 +139,18 @@ FLEX_DEPTH_PROJ_FLOOR = 0.06  # ...floored by this fraction of projected points
 # you start one TE and flex an RB/WR. Also corrects for TE's shallow-replacement
 # VOR inflation, so a second elite TE doesn't outrank real RB/WR flex value.
 TE_FLEX_DISCOUNT = 0.5
+# TE's VOR runs high because replacement-level TE is so low. Trim the starting-TE
+# slot a touch so an elite TE doesn't outrank a comparable WR for an early pick —
+# you still take the top TEs, just not ahead of a receiver of equal real value.
+TE_STARTER_DISCOUNT = 0.85
 # RB startable supply dries up faster than WR (fewer bell-cows, more injuries),
 # so a startable RB is worth a touch more than an equal-value WR for flex/depth.
 RB_SCARCITY_BOOST = 1.12
+# Rounding out your starting lineup beats stacking one position early: your
+# FIRST starter at a position (WR1 when you have zero WRs) is worth more than a
+# third RB of similar value. Enough to outweigh RB scarcity, so an RB-first
+# start naturally leans WR next instead of piling on running backs.
+FIRST_STARTER_BONUS = 1.22
 # Positions eligible for FLEX / SUPER_FLEX slots.
 FLEX_ELIGIBLE = ("RB", "WR", "TE")
 SUPERFLEX_ELIGIBLE = ("QB", "RB", "WR", "TE")
@@ -154,6 +167,12 @@ BENCH_ALLOWANCE_DEFAULT = 4
 # picks to grab them.
 KDEF_MAX_SCORE = 55.0
 KDEF_LATE_WINDOW = 4  # picks before you'd be forced, when K/DEF start surfacing
+# A clear tier-leader at K/DEF (a Brandon Aubrey) is worth taking near his ADP
+# rather than dead last — an edge a replacement-level bench flier won't give you.
+# Ordinary K/DEF still wait for the late window; only a real gap qualifies.
+KDEF_ELITE_GAP = 15  # ADP lead over the next-best at the position to count as elite
+KDEF_ADP_WINDOW = 14  # start surfacing him within ~a round of his ADP
+KDEF_ELITE_SCORE = 52.0  # near his ADP he outranks replacement-level bench fliers
 
 # The suggestion list is a decision aid, not a pure value ranking: showing four
 # tight ends is useless even when they're the four highest-scored players. Cap
@@ -512,24 +531,24 @@ async def compute_draft_board(
             r["replacement_points"] = round(replacement, 1)
             r["proj_points"] = round(r["proj_points"], 1)
 
-    # Pass 3 — overall order by VOR, then the market comparison
+    # Pass 3 — our pure-value rank by VOR, then the market comparison.
     rows.sort(key=lambda r: r["vor"], reverse=True)
     for i, r in enumerate(rows):
+        r["vor_rank"] = i + 1  # our projection-only rank — the market yardstick
         r["overall_rank"] = i + 1
         r["is_tier_end"] = False
         r["adp_rank"] = None
         r["adp_delta"] = None
         r["value_score"] = 0.0
 
-    # Market position measured on this same board. Comparing our rank against
-    # raw ADP is apples-to-oranges — ADP counts the ~30 kicker and defense
-    # picks this board excludes, an offset that grows deeper into the draft and
-    # made every mid-round tight end read as a steal.
-    # Positive delta: the market lets him slide past where we value him.
+    # Comparing to raw ADP is apples-to-oranges — ADP counts the ~30 kicker and
+    # defense picks this board excludes, an offset that grows deeper into the
+    # draft and made every mid-round tight end read as a steal. Positive delta:
+    # the market lets him slide past us.
     with_adp = sorted((r for r in rows if r["adp"]), key=lambda r: r["adp"])
     for i, r in enumerate(with_adp):
         r["adp_rank"] = i + 1
-        r["adp_delta"] = r["adp_rank"] - r["overall_rank"]
+        r["adp_delta"] = r["adp_rank"] - r["vor_rank"]
         # Rank gap weighted by the size of the actual edge — see VALUE_VOR_SCALE.
         # Sub-replacement players score zero: a bargain on someone you shouldn't
         # roster isn't a bargain.
@@ -634,7 +653,20 @@ def _lineup_value(
 
     if have < ded:
         floor = max(vor, STARTER_VALUE_FLOOR)
-        return floor * scarcity, True, f"Fills a starting {position} slot"
+        # Your first starter at a position is worth more than a stacked one — it
+        # rounds out the lineup instead of doubling down. QB is exempt: in a
+        # 1-QB league you wait on the position, so a breadth bonus there would
+        # wrongly reach for an early quarterback.
+        breadth = FIRST_STARTER_BONUS if (have == 0 and position != "QB") else 1.0
+        # TE's VOR is inflated by a very shallow replacement level, so an elite
+        # TE reads as higher value than a comparable WR/RB. Trim the starting-TE
+        # slot so you don't reach past a receiver for your one tight end.
+        disc = TE_STARTER_DISCOUNT if position == "TE" else 1.0
+        return (
+            floor * scarcity * breadth * disc,
+            True,
+            f"Fills a starting {position} slot",
+        )
     if position in FLEX_ELIGIBLE and flex_open > 0:
         floor = max(vor, STARTER_VALUE_FLOOR)
         if position == "TE":
@@ -673,38 +705,62 @@ def _kdef_candidates(
     taken: set[str],
     held: Counter,
     picks_left: int,
+    next_pick: int | None = None,
 ) -> list[dict]:
     """Kicker/defense picks scored on an urgency ramp, not VOR.
 
     Returns at most one candidate per position (the best still on the board),
     scored ~0 while you have picks to spare and rising to the top of the list
-    as you approach being forced to reach for one.
+    as you approach being forced to reach for one. A clear tier-leader (a real
+    ADP gap to the next-best) is the exception — he surfaces around his own ADP,
+    since an elite kicker/defense outweighs a replacement-level bench flier.
     """
     unfilled = (0 if held.get("K") else 1) + (0 if held.get("DEF") else 1)
     out: list[dict] = []
     for position in LATE_ROUND_POSITIONS:
         if held.get(position):
             continue  # never a second K or DEF
-        pool = [
-            p
-            for p in late_round
-            if p["position"] == position and p["player_id"] not in taken and p["adp"]
-        ]
+        pool = sorted(
+            (
+                p
+                for p in late_round
+                if p["position"] == position and p["player_id"] not in taken and p["adp"]
+            ),
+            key=lambda p: p["adp"],
+        )
         if not pool:
             continue
-        best = min(pool, key=lambda p: p["adp"])
+        best = pool[0]
         # slack = picks you can still "spend" before you'd be forced to grab the
         # K/DEF you still owe. Once it hits the late window the ramp lifts.
         slack = picks_left - unfilled
         urgency = max(0.0, (KDEF_LATE_WINDOW - slack) / KDEF_LATE_WINDOW)
         score = KDEF_MAX_SCORE * min(1.0, urgency)
-        if score <= 0:
-            continue  # keep them out of early suggestions entirely
         reason = (
             f"Only {picks_left} picks left and no {position} yet"
             if slack <= 0
             else f"Time to lock in a {position} — they'll go soon"
         )
+
+        # Elite tier-leader surfacing: a clear #1 (big ADP lead) once the draft
+        # has reached within ~a round of his ADP. KICKER ONLY — an elite kicker
+        # (Aubrey) is a real edge worth taking near ADP, but defenses are
+        # streamable with no must-draft-early DST, so a DEF never surfaces early
+        # (it would keep topping startable offense in the middle rounds).
+        if position == "K" and next_pick and len(pool) > 1:
+            gap = pool[1]["adp"] - best["adp"]
+            if gap >= KDEF_ELITE_GAP and next_pick >= best["adp"] - KDEF_ADP_WINDOW:
+                proximity = 1 - max(0.0, best["adp"] - next_pick) / KDEF_ADP_WINDOW
+                elite = KDEF_ELITE_SCORE * max(0.0, min(1.0, proximity))
+                if elite > score:
+                    score = elite
+                    reason = (
+                        f"Elite {position} — the clear #1 (going ~pick "
+                        f"{round(best['adp'])}); an edge a late flier won't give you"
+                    )
+
+        if score <= 0:
+            continue  # keep ordinary K/DEF out of early suggestions entirely
         out.append(
             {
                 **best,
@@ -844,7 +900,9 @@ def recommend_picks(
     # Kicker/defense enter only when the draft is late enough to need them.
     if late_round and rounds:
         picks_left = max(1, rounds - len(my_player_ids))
-        scored.extend(_kdef_candidates(late_round, taken, held, picks_left))
+        scored.extend(
+            _kdef_candidates(late_round, taken, held, picks_left, next_pick)
+        )
 
     scored.sort(key=lambda r: r["score"], reverse=True)
     return _diversify(scored, limit)

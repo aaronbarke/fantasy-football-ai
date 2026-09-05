@@ -9,6 +9,27 @@ context to give grounded, data-backed advice.
 > "An AI assistant that knows your fantasy league as well as you do, and never
 > forgets to check the injury report."
 
+**🔗 Live demo:** [ffai.example.com](https://ffai.example.com) &nbsp;·&nbsp;
+one-click **Demo login** on the sign-in page loads a fully seeded league — no signup required.
+
+**Stack:** Next.js 14 · TypeScript · FastAPI (Python 3.13, async) · PostgreSQL 16 · Redis · Claude API · APScheduler · Docker · Vercel + Railway
+
+### Why this project
+
+- **Full-stack + ML from scratch, shipped.** Custom weekly-projection model that **beats Sleeper's own projections on backtested MAE** (5.62 vs 5.66 PPR, point-in-time-safe — see [`documents/backtest_results.md`](documents/backtest_results.md)).
+- **Grounded LLM, not a chatbot wrapper.** Every AI reply runs through intent classification → typed context assembly → structured prompting, with a `context_snapshot` audit trail of exactly what the model saw. No hallucinated stats.
+- **Real integrations.** Live sync with Sleeper + ESPN league APIs (including private-league cookie auth), nflverse parquet stats, Open-Meteo weather, and The Odds API for a working sportsbook **arbitrage detector**.
+- **Production-shaped.** 43 backend unit tests, CI on every push (ruff + pytest + frontend typecheck/lint), production-hardened boot checks (rejects default JWT secret, gates admin endpoints, blocks demo-account mutations), Dockerfiles for both services.
+
+### Screenshots
+
+<!-- Add PNGs to docs/screenshots/ and they'll render here -->
+| Weekly Game Plan | AI chat (grounded) | Draft room |
+|---|---|---|
+| ![Game plan](docs/screenshots/gameplan.png) | ![Chat](docs/screenshots/chat.png) | ![Draft](docs/screenshots/draft.png) |
+
+---
+
 ## Feature highlights
 
 - **Weekly Game Plan** — one click builds the projection-optimal lineup,

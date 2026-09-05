@@ -18,7 +18,11 @@ from app.services.draft_service import (
     replacement_ranks,
     roster_needs,
 )
-from app.services.live_draft_service import build_demo_state, espn_live_draft_state
+from app.services.live_draft_service import (
+    build_demo_state,
+    espn_external_draft_state,
+    espn_live_draft_state,
+)
 from app.services.news_service import recent_news_by_player
 from app.utils.security import get_current_user
 
@@ -202,7 +206,10 @@ async def live_draft(
         state = await espn_live_draft_state(db, conn)
         if state.get("your_slot"):
             my_slot = state["your_slot"]
-        return build_demo_state(board, teams, rounds, my_slot, demo_picks)
+        late = await late_round_board(db, season, scoring)
+        return build_demo_state(
+            board, teams, rounds, my_slot, demo_picks, late, conn.roster_positions
+        )
 
     if conn.platform != "espn":
         raise HTTPException(
@@ -210,6 +217,26 @@ async def live_draft(
             "Live draft sync is only available for ESPN leagues right now",
         )
     return await espn_live_draft_state(db, conn)
+
+
+@router.get("/live-external")
+async def live_draft_external(
+    espn_league_id: str = Query(..., min_length=1),
+    season: int | None = None,
+    espn_s2: str | None = None,
+    swid: str | None = None,
+    team_id: str | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Live draft state for any ESPN league by ID — no saved connection needed.
+
+    Use this to sync a standalone ESPN Mock Draft Lobby draft: join the lobby,
+    grab the league ID from the URL, and paste it here."""
+    season = season or get_settings().current_season
+    return await espn_external_draft_state(
+        db, espn_league_id, season, espn_s2, swid, team_id
+    )
 
 
 @router.post("/recommend")
@@ -230,6 +257,7 @@ async def draft_recommend(
     rounds = body.rounds or (
         len(roster_positions) if roster_positions else DEFAULT_ROUNDS
     )
+    late = await late_round_board(db, season, scoring)
     picks = recommend_picks(
         board,
         roster_positions,
@@ -238,10 +266,13 @@ async def draft_recommend(
         body.next_pick,
         body.following_pick,
         body.limit,
-        late_round=await late_round_board(db, season, scoring),
+        late_round=late,
         rounds=rounds,
     )
+    # Include the K/DEF pool so a drafted kicker/defense counts toward needs.
     by_id = {r["player_id"]: r for r in board}
+    for r in late:
+        by_id.setdefault(r["player_id"], r)
     my_positions = [
         by_id[pid]["position"] for pid in body.my_player_ids if pid in by_id
     ]
@@ -273,6 +304,7 @@ async def draft_advice(
     rounds = body.rounds or (
         len(roster_positions) if roster_positions else DEFAULT_ROUNDS
     )
+    late = await late_round_board(db, season, scoring)
     picks = recommend_picks(
         board,
         roster_positions,
@@ -281,10 +313,12 @@ async def draft_advice(
         body.next_pick,
         body.following_pick,
         limit=6,
-        late_round=await late_round_board(db, season, scoring),
+        late_round=late,
         rounds=rounds,
     )
     by_id = {r["player_id"]: r for r in board}
+    for r in late:
+        by_id.setdefault(r["player_id"], r)
     my_roster = [
         {
             "name": by_id[pid]["name"],
