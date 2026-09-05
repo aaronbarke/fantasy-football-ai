@@ -31,6 +31,12 @@ one-click **Demo login** on the sign-in page skips signup and lands on a fully s
   (rejects default JWT secret, gates admin endpoints, blocks demo-account
   mutations), Dockerfiles for both services.
 
+### A look at it
+
+| Weekly Game Plan | AI chat (grounded) | Draft room |
+|---|---|---|
+| [![Weekly Game Plan](docs/screenshots/gameplan.png)](docs/screenshots/gameplan.png) | [![AI chat with receipts](docs/screenshots/chat.png)](docs/screenshots/chat.png) | [![Draft room](docs/screenshots/draft.png)](docs/screenshots/draft.png) |
+
 ## What's in it
 
 - **Weekly Game Plan** — one click builds the projection-optimal lineup, flags
