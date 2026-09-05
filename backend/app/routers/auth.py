@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models import AvailablePlayer, LeagueConnection, Matchup, Roster, User
+from app.models import LeagueConnection, User
 from app.schemas.auth import (
     GoogleAuthRequest,
     LoginRequest,
@@ -60,11 +60,10 @@ async def _get_or_create_user(db: AsyncSession, email: str) -> User:
 
 
 async def _ensure_demo_league(db: AsyncSession, demo: User) -> None:
-    """Seed the demo account with a snapshot of a populated league so it lands
-    on a fully-loaded app, not the connect screen. Clones the most recently
-    synced league that actually has drafted rosters (snapshot only — never
-    copies private credentials). No-op if the demo already has a league or no
-    populated source exists."""
+    """Check that the shared demo account has a league to land on. The league
+    itself is written by `scripts/seed_demo_league.py` (a canned 10-team
+    fixture with fake team names), which is run once per deploy — this only
+    verifies it's there and logs a hint if it isn't."""
     has_league = (
         await db.execute(
             select(LeagueConnection.id).where(LeagueConnection.user_id == demo.id)
@@ -72,97 +71,10 @@ async def _ensure_demo_league(db: AsyncSession, demo: User) -> None:
     ).first()
     if has_league:
         return
-
-    candidates = (
-        (
-            await db.execute(
-                select(LeagueConnection)
-                .where(LeagueConnection.user_id != demo.id)
-                .order_by(LeagueConnection.last_synced_at.desc().nulls_last())
-            )
-        )
-        .scalars()
-        .all()
+    logger.warning(
+        "Demo user has no league — run `python -m scripts.seed_demo_league` "
+        "to populate the demo fixture."
     )
-    source = None
-    source_rosters: list[Roster] = []
-    for c in candidates:
-        rosters = (
-            (await db.execute(select(Roster).where(Roster.connection_id == c.id)))
-            .scalars()
-            .all()
-        )
-        if any(r.players for r in rosters):  # prefer a drafted, populated league
-            source, source_rosters = c, rosters
-            break
-    if source is None:
-        return
-
-    clone = LeagueConnection(
-        user_id=demo.id,
-        platform=source.platform,
-        platform_user_id=None,
-        league_id=source.league_id,
-        league_name=source.league_name,
-        season=source.season,
-        scoring_type=source.scoring_type,
-        scoring_settings=source.scoring_settings,
-        roster_positions=source.roster_positions,
-        credentials=None,  # never copy private cookies into the shared demo
-        team_id=source.team_id,
-        last_synced_at=source.last_synced_at,
-    )
-    db.add(clone)
-    await db.flush()  # assign clone.id
-
-    for r in source_rosters:
-        db.add(
-            Roster(
-                connection_id=clone.id,
-                team_id=r.team_id,
-                owner_name=r.owner_name,
-                players=r.players,
-                starters=r.starters,
-                wins=r.wins,
-                losses=r.losses,
-                ties=r.ties,
-                points_for=r.points_for,
-                points_against=r.points_against,
-            )
-        )
-    for m in (
-        (await db.execute(select(Matchup).where(Matchup.connection_id == source.id)))
-        .scalars()
-        .all()
-    ):
-        db.add(
-            Matchup(
-                connection_id=clone.id,
-                week=m.week,
-                team_a_id=m.team_a_id,
-                team_b_id=m.team_b_id,
-                team_a_points=m.team_a_points,
-                team_b_points=m.team_b_points,
-            )
-        )
-    for a in (
-        (
-            await db.execute(
-                select(AvailablePlayer).where(AvailablePlayer.connection_id == source.id)
-            )
-        )
-        .scalars()
-        .all()
-    ):
-        db.add(
-            AvailablePlayer(
-                connection_id=clone.id,
-                player_id=a.player_id,
-                trending_count=a.trending_count,
-                recent_ppr_avg=a.recent_ppr_avg,
-            )
-        )
-    await db.commit()
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
@@ -230,13 +142,14 @@ async def google_auth(body: GoogleAuthRequest, db: AsyncSession = Depends(get_db
 
 @router.post("/demo", response_model=TokenResponse)
 async def demo_login(db: AsyncSession = Depends(get_db)):
-    """One-click login to a shared demo account — no signup required. Seeds a
-    populated league snapshot so the demo lands on a fully-loaded app."""
+    """One-click login to a shared demo account — no signup required. Expects
+    the demo league fixture to already be seeded (see
+    `scripts/seed_demo_league.py`)."""
     user = await _get_or_create_user(db, DEMO_EMAIL)
     try:
         await _ensure_demo_league(db, user)
     except Exception:
-        logger.exception("Demo league seed failed")
+        logger.exception("Demo league check failed")
     return _tokens_for(user)
 
 

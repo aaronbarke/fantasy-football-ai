@@ -30,6 +30,14 @@ below is free-tier-friendly.
    `create_all`; you still need player/stat data): run the seed the same way you
    do locally, pointed at the prod `DATABASE_URL`. After that, the scheduler keeps
    it fresh, or hit `POST /api/admin/refresh-stats` as an admin.
+6. **Seed the demo league fixture** (canned 10-team league the public "Try a
+   demo" login lands on — see `backend/scripts/seed_demo_league.py`). Run it
+   once from the Railway shell so first-time visitors see a fake league, not
+   another user's real rosters:
+   ```bash
+   python -m scripts.seed_demo_league
+   ```
+   Idempotent — no-op on subsequent runs once the demo user has a league.
 
 ## 2. Frontend (Vercel)
 
