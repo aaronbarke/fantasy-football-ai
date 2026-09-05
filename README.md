@@ -12,7 +12,7 @@ context to give grounded, data-backed advice.
 **🔗 Live demo:** [fantasy-football-ai-theta.vercel.app](https://fantasy-football-ai-theta.vercel.app) &nbsp;·&nbsp;
 one-click **Demo login** on the sign-in page loads a fully seeded league — no signup required.
 
-**Stack:** Next.js 14 · TypeScript · FastAPI (Python 3.13, async) · PostgreSQL 16 · Redis · Claude API · APScheduler · Docker · Vercel + Railway
+**Stack:** Next.js 14 · TypeScript · Tailwind · FastAPI (Python 3.13, async) · PostgreSQL 16 · Redis (optional cache) · Claude API · APScheduler · Docker · Vercel + Railway
 
 ### Why this project
 
@@ -23,10 +23,14 @@ one-click **Demo login** on the sign-in page loads a fully seeded league — no 
 
 ### Screenshots
 
-<!-- Add PNGs to docs/screenshots/ and they'll render here -->
+_Coming soon — drop `gameplan.png`, `chat.png`, `draft.png` into [`docs/screenshots/`](docs/screenshots/) and this row will render._
+
+<!--
 | Weekly Game Plan | AI chat (grounded) | Draft room |
 |---|---|---|
 | ![Game plan](docs/screenshots/gameplan.png) | ![Chat](docs/screenshots/chat.png) | ![Draft](docs/screenshots/draft.png) |
+-->
+
 
 ---
 
@@ -213,11 +217,13 @@ runs ruff + pytest and the frontend typecheck + lint on every push.
 
 ## Deployment
 
-Frontend on Vercel, backend + Postgres + Redis on Railway (Dockerfiles
-included). Step-by-step with the full prod env matrix:
+Frontend on **Vercel**, backend + **PostgreSQL** on **Railway** (Redis is
+an optional cache — omit it and the app degrades gracefully). Both services
+ship with Dockerfiles. Step-by-step with the full prod env matrix:
 [`docs/DEPLOY.md`](docs/DEPLOY.md). In production the backend refuses to boot
 with the default `JWT_SECRET`, admin endpoints require `ADMIN_EMAILS`, and the
-shared demo account is blocked from mutating actions.
+shared demo account is blocked from mutating actions. Live at
+[fantasy-football-ai-theta.vercel.app](https://fantasy-football-ai-theta.vercel.app).
 
 ## Roadmap
 
