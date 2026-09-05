@@ -13,15 +13,17 @@ a no-op.
 Run:  python -m scripts.seed_demo_league
 """
 
+import argparse
 import asyncio
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import (
+    AvailablePlayer,
     LeagueConnection,
     Matchup,
     Player,
@@ -134,6 +136,40 @@ async def _get_or_create_demo_user(db: AsyncSession) -> User:
     return user
 
 
+async def reset_demo_league(db: AsyncSession) -> int:
+    """Delete the demo user's existing league(s) and their child rows.
+
+    Needed when the demo account was populated by the old clone-from-real-user
+    flow (or an earlier fixture) and we want to re-seed from scratch. No-op if
+    the demo user or its leagues don't exist. Returns the number of league
+    connections removed."""
+    demo = (
+        await db.execute(select(User).where(User.email == DEMO_EMAIL))
+    ).scalar_one_or_none()
+    if demo is None:
+        return 0
+
+    conn_ids = (
+        (
+            await db.execute(
+                select(LeagueConnection.id).where(LeagueConnection.user_id == demo.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not conn_ids:
+        return 0
+
+    # Delete children first so this works whether or not the FKs cascade.
+    for model in (Roster, Matchup, AvailablePlayer):
+        await db.execute(delete(model).where(model.connection_id.in_(conn_ids)))
+    await db.execute(delete(LeagueConnection).where(LeagueConnection.id.in_(conn_ids)))
+    await db.commit()
+    logger.info("Reset demo league: removed %d connection(s).", len(conn_ids))
+    return len(conn_ids)
+
+
 async def seed_demo_league(db: AsyncSession) -> bool:
     """Populate the demo user's league from the canned fixture.
 
@@ -208,13 +244,23 @@ async def seed_demo_league(db: AsyncSession) -> bool:
     return True
 
 
-async def main() -> None:
+async def main(reset: bool = False) -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
     )
     async with SessionLocal() as db:
+        if reset:
+            await reset_demo_league(db)
         await seed_demo_league(db)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="Seed the shared demo league.")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Delete the demo user's existing league first, then re-seed from "
+        "the fixture (use this to replace an old clone-from-real-user league).",
+    )
+    args = parser.parse_args()
+    asyncio.run(main(reset=args.reset))
