@@ -9,58 +9,52 @@ context to give grounded, data-backed advice.
 > "An AI assistant that knows your fantasy league as well as you do, and never
 > forgets to check the injury report."
 
-**🔗 Live demo:** [fantasy-football-ai-theta.vercel.app](https://fantasy-football-ai-theta.vercel.app) &nbsp;·&nbsp;
-one-click **Demo login** on the sign-in page loads a fully seeded league — no signup required.
+**🔗 Live:** [fantasy-football-ai-theta.vercel.app](https://fantasy-football-ai-theta.vercel.app) &nbsp;·&nbsp;
+one-click **Demo login** on the sign-in page skips signup and lands on a fully seeded league.
 
 **Stack:** Next.js 14 · TypeScript · Tailwind · FastAPI (Python 3.13, async) · PostgreSQL 16 · Redis (optional cache) · Claude API · APScheduler · Docker · Vercel + Railway
 
 ### Why this project
 
-- **Full-stack + ML from scratch, shipped.** Custom weekly-projection model that **beats Sleeper's own projections on backtested MAE** (5.62 vs 5.66 PPR, point-in-time-safe — see [`documents/backtest_results.md`](documents/backtest_results.md)).
-- **Grounded LLM, not a chatbot wrapper.** Every AI reply runs through intent classification → typed context assembly → structured prompting, with a `context_snapshot` audit trail of exactly what the model saw. No hallucinated stats.
-- **Real integrations.** Live sync with Sleeper + ESPN league APIs (including private-league cookie auth), nflverse parquet stats, Open-Meteo weather, and The Odds API for a working sportsbook **arbitrage detector**.
-- **Production-shaped.** 43 backend unit tests, CI on every push (ruff + pytest + frontend typecheck/lint), production-hardened boot checks (rejects default JWT secret, gates admin endpoints, blocks demo-account mutations), Dockerfiles for both services.
+- **Full-stack + ML from scratch, shipped.** Custom weekly-projection model that
+  **beats Sleeper's own projections on backtested MAE** (5.62 vs 5.66 PPR,
+  point-in-time-safe — see [`documents/backtest_results.md`](documents/backtest_results.md)).
+- **Grounded LLM, not a chatbot wrapper.** Every AI reply runs through intent
+  classification → typed context assembly → structured prompting, with a
+  `context_snapshot` audit trail of exactly what the model saw. No hallucinated
+  stats.
+- **Real integrations.** Live sync with Sleeper + ESPN league APIs (including
+  private-league cookie auth), nflverse parquet stats, Open-Meteo weather, and
+  The Odds API for a working sportsbook **arbitrage detector**.
+- **Production-shaped.** 43 backend unit tests, CI on every push
+  (ruff + pytest + frontend typecheck/lint), production-hardened boot checks
+  (rejects default JWT secret, gates admin endpoints, blocks demo-account
+  mutations), Dockerfiles for both services.
 
-### Screenshots
+## What's in it
 
-_Coming soon — drop `gameplan.png`, `chat.png`, `draft.png` into [`docs/screenshots/`](docs/screenshots/) and this row will render._
-
-<!--
-| Weekly Game Plan | AI chat (grounded) | Draft room |
-|---|---|---|
-| ![Game plan](docs/screenshots/gameplan.png) | ![Chat](docs/screenshots/chat.png) | ![Draft](docs/screenshots/draft.png) |
--->
-
-
----
-
-## Feature highlights
-
-- **Weekly Game Plan** — one click builds the projection-optimal lineup,
-  flags start/sit swaps vs your current starters, projects your score, and
-  computes win probability against this week's opponent — then an AI coach's
-  brief explains every call.
+- **Weekly Game Plan** — one click builds the projection-optimal lineup, flags
+  start/sit swaps vs your current starters, projects your score, and computes
+  win probability against this week's opponent. An AI coach's brief explains
+  every call.
 - **Projection engine** — per-player weekly projections (floor/ceiling bands)
-  that **blend our two-season recency-weighted model with Sleeper's weekly
-  projection**, plus defense-vs-position matchup, Vegas implied-total, and
-  game-day weather adjustments. Backtested against actuals (see
-  [Models & validation](#models--validation)).
-- **AI chat with receipts** — streaming answers grounded in your roster,
-  live stats, matchup difficulty, weather, and betting lines. Start/sit calls
-  are recorded and graded against actual results (the accuracy tracker).
-- **Trade analyzer** — a market-style player value from **Value Over
-  Replacement** with tier-damped momentum (a star's down week doesn't crater
-  him; a scrub's one big game doesn't overrate him), a peak floor, and a roster
-  floor. Scale-independent grading, roster-fit (depth before/after), trend
-  arrows, and sweetener suggestions to even lopsided deals.
-- **Betting edge** — live line shopping across *regulated* US sportsbooks: best
-  price on every moneyline/spread/total, a true **arbitrage detector** that
-  flags guaranteed-profit splits, ranked by how much the books disagree.
-- **Auth** — email/password, one-click **demo login** (seeded with a populated
-  league), and optional **Google sign-in**.
-- **Draft assistant, schedule-strength heatmap (incl. fantasy playoffs, Wk
-  15-17), player comparison charts, player headshots, multi-league switcher,
-  injury email alerts, dark mode, installable PWA.**
+  that blend our two-season recency-weighted model with Sleeper's weekly
+  projection, then nudge for defense-vs-position matchup, Vegas implied total,
+  and game-day weather.
+- **AI chat with receipts** — streaming answers grounded in your roster, live
+  stats, matchup difficulty, weather, and betting lines. Start/sit calls are
+  recorded and graded against actual results.
+- **Trade analyzer** — market-style player value from Value Over Replacement
+  with tier-damped momentum (a star's down week doesn't crater him; a scrub's
+  one big game doesn't overrate him), a peak floor, and a roster floor.
+  Scale-independent grading, roster-fit context, trend arrows, and sweetener
+  suggestions to even lopsided deals.
+- **Betting edge** — live line shopping across regulated US sportsbooks. Best
+  price on every moneyline / spread / total, plus a true **arbitrage detector**
+  that flags guaranteed-profit splits, ranked by how much the books disagree.
+- **Draft assistant**, schedule-strength heatmap through the fantasy-playoff
+  weeks, player compare, multi-league switcher, injury email alerts, dark mode,
+  and an installable PWA.
 
 ## Architecture
 
@@ -85,27 +79,27 @@ _Coming soon — drop `gameplan.png`, `chat.png`, `draft.png` into [`docs/screen
         PostgreSQL 16 (+ Redis cache)
 ```
 
-### How the AI chat works
+### How the AI chat actually works
 
-It does **not** just forward your question to Claude:
+It doesn't just forward your question to Claude. Each reply runs through:
 
-1. **Intent classification** — start/sit, trade, waiver, matchup, or general
-2. **Context assembly** — based on intent, the context builder pulls exactly the
-   data needed: your roster, the mentioned players' last-5-week stats, injury
-   status, the matchup's Vegas spread/implied totals, and stadium weather
-3. **Structured prompting** — the data is injected as JSON into a system+user
-   prompt with strict grounding rules ("never make up stats")
+1. **Intent classification** — start/sit, trade, waiver, matchup, or general.
+2. **Context assembly** — the builder pulls exactly the data needed for that
+   intent: your roster, mentioned players' last-5-week stats, injury status,
+   the matchup's Vegas spread/implied totals, and stadium weather.
+3. **Structured prompting** — that data goes in as JSON alongside a system
+   prompt with strict grounding rules ("never make up stats").
 4. **Audit trail** — every response stores a `context_snapshot` of exactly what
-   data the AI saw when it gave that advice
+   data the model saw, so past advice can be graded against how the week
+   actually played out.
 
 ## Models & validation
 
-**Projection** (`projection_service.py`) blends two independent signals — our
-recency-weighted two-season baseline and Sleeper's published weekly projection
-(50/50) — then nudges for matchup, Vegas implied total, and weather. A
-point-in-time **backtest** (predict each 2025 week from prior-only data,
-compare to actuals; `python -m scripts.backtest_projections`) shows the blend
-is the most accurate option:
+The **projection blend** (`projection_service.py`) mixes two independent
+signals — our recency-weighted two-season baseline and Sleeper's published
+weekly projection (50/50) — then nudges for matchup, Vegas implied total, and
+weather. Point-in-time backtest against 2025 actuals (predict each week from
+prior-only data, `python -m scripts.backtest_projections`):
 
 | Method | MAE (PPR) |
 |---|---:|
@@ -117,78 +111,16 @@ is the most accurate option:
 The blend beats Sleeper's own projections *and* our model alone — full writeup
 in [`documents/backtest_results.md`](documents/backtest_results.md).
 
-**Trade value** (`value_service.py`) is a single number from Value Over
-Replacement, so it's comparable across positions and behaves like a market:
+The **trade value** (`value_service.py`) is a single number derived from Value
+Over Replacement, so it's comparable across positions and behaves like a market:
 
 - **Peak floor** — a proven player can't fall below 90% of his better of the
-  last two seasons, so a down/injury year dents but doesn't crater him.
+  last two seasons, so a down / injury year dents but doesn't crater him.
 - **Tier-damped, streak-aware momentum** — a high-value player's lone cold game
   barely moves him; a low-value player's lone hot game barely moves him; only
   *consecutive* weeks compound, in either direction.
-- **Roster floor** — every rosterable player carries a baseline (you can't
-  acquire a real contributor for nothing), so flex types aren't valued at ~0.
-
-## Quickstart (local dev)
-
-```bash
-# 1. Infra: Postgres + Redis
-docker compose up -d postgres redis
-
-# 2. Backend
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env          # add your ANTHROPIC_API_KEY
-uvicorn app.main:app --reload  # http://localhost:8000/docs
-
-# 3. Frontend
-cd ../frontend
-npm install
-npm run dev                    # http://localhost:3000
-```
-
-Or run everything in Docker: `docker compose up --build`.
-
-### First-time data load
-
-After the backend is running, seed the player database and stats (one-time;
-afterwards the scheduler keeps them fresh when `ENABLE_SCHEDULER=true`):
-
-```bash
-cd backend && source .venv/bin/activate
-python -c "
-import asyncio
-from app.database import SessionLocal, create_all
-from app.services.sync_service import sync_player_pool
-from app.services.nfl_data_service import sync_id_crosswalk, sync_weekly_stats
-
-async def seed():
-    await create_all()
-    async with SessionLocal() as db:
-        await sync_player_pool(db)        # ~2k fantasy players from Sleeper
-        await sync_id_crosswalk(db)       # gsis/espn/yahoo ID mapping
-        await sync_weekly_stats(db, [2024, 2025])  # two seasons (the model blends both)
-
-asyncio.run(seed())
-"
-```
-
-Then open http://localhost:3000, create an account, and connect your Sleeper
-league by username.
-
-## Configuration
-
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | Postgres (or sqlite for quick dev) |
-| `ANTHROPIC_API_KEY` | Powers the AI chat (chat returns a setup notice without it) |
-| `ODDS_API_KEY` | Free key from the-odds-api.com — Vegas lines + betting page |
-| `JWT_SECRET` | Auth signing key (required in production) |
-| `ENVIRONMENT` | `development` or `production` (gates secret/admin checks) |
-| `ADMIN_EMAILS` | Comma-separated emails allowed to hit admin endpoints |
-| `GOOGLE_CLIENT_ID` | Optional — enables Google sign-in (no secret needed) |
-| `ENABLE_SCHEDULER` | `true` to run background data refresh jobs |
-| `CURRENT_SEASON` | NFL season year |
+- **Roster floor** — every rosterable player carries a baseline, so flex-type
+  contributors aren't valued at ~0.
 
 ## Data sources (all free)
 
@@ -199,36 +131,39 @@ league by username.
 | nflverse (parquet via httpx) | Weekly stats, target share, ID crosswalk |
 | Sleeper projections | Weekly per-player projections (blended into ours) |
 | ESPN public API | Injury reports |
-| Open-Meteo | Stadium weather (no key needed) |
+| Open-Meteo | Stadium weather |
 | The Odds API | Spreads & totals → implied team totals |
 
-## Testing
+## Testing & CI
 
-```bash
-cd backend && ruff check app tests && pytest   # 43 unit tests
-cd frontend && npm run typecheck && npm run lint
-```
-
-Backend tests cover the value model (momentum damping, streak compounding,
-roster floor), trade grading, betting arbitrage + book filtering, weather
-adjustment, projection win-probability, lineup optimization, intent
-classification, and fantasy scoring math. **CI** (`.github/workflows/ci.yml`)
-runs ruff + pytest and the frontend typecheck + lint on every push.
+43 backend unit tests cover the value model (momentum damping, streak
+compounding, roster floor), trade grading, betting arbitrage + book filtering,
+weather adjustment, projection win-probability, lineup optimization, intent
+classification, and fantasy scoring math. GitHub Actions runs `ruff + pytest`
+and the frontend `typecheck + lint` on every push.
 
 ## Deployment
 
-Frontend on **Vercel**, backend + **PostgreSQL** on **Railway** (Redis is
-an optional cache — omit it and the app degrades gracefully). Both services
-ship with Dockerfiles. Step-by-step with the full prod env matrix:
-[`docs/DEPLOY.md`](docs/DEPLOY.md). In production the backend refuses to boot
-with the default `JWT_SECRET`, admin endpoints require `ADMIN_EMAILS`, and the
-shared demo account is blocked from mutating actions. Live at
-[fantasy-football-ai-theta.vercel.app](https://fantasy-football-ai-theta.vercel.app).
+Frontend on **Vercel**, backend + **PostgreSQL** on **Railway**. Both services
+ship with Dockerfiles; Redis is an optional cache and the app degrades
+gracefully without it. Full prod env matrix and step-by-step in
+[`docs/DEPLOY.md`](docs/DEPLOY.md). Production boots refuse the default
+`JWT_SECRET`, admin endpoints require `ADMIN_EMAILS`, and the shared demo
+account is blocked from mutating actions.
+
+## Running it locally
+
+Postgres + Redis via `docker compose up -d postgres redis`, backend with
+`uvicorn app.main:app --reload` in `backend/` (after
+`pip install -r requirements-dev.txt` and filling in `.env` from
+`.env.example`), frontend with `npm run dev` in `frontend/`. Or bring the whole
+stack up in one shot with `docker compose up --build`. First-time seed script
+and full env matrix in [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ## Roadmap
 
-- [ ] Yahoo integration (OAuth)
-- [ ] Push notifications for injury alerts (email alerts already ship)
-- [ ] Historical odds/weather so the full projection (not just its core) is
-      backtestable
-- [ ] Dynasty mode: draft-pick values + rest-of-season vs this-week toggle
+- Yahoo integration (OAuth)
+- Push notifications for injury alerts (email alerts already ship)
+- Historical odds / weather so the full projection (not just its core) is
+  backtestable
+- Dynasty mode: draft-pick values + rest-of-season vs this-week toggle
