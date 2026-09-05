@@ -17,7 +17,7 @@ import argparse
 import asyncio
 import logging
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -28,6 +28,7 @@ from app.models import (
     Matchup,
     Player,
     PlayerDraftProfile,
+    PlayerStatsWeekly,
     Roster,
     User,
 )
@@ -61,12 +62,54 @@ ROSTER_POSITIONS = [
 # Per-team positional composition — sums to 15 to fill ROSTER_POSITIONS.
 POSITION_COUNTS = {"QB": 2, "RB": 4, "WR": 5, "TE": 2, "K": 1, "DEF": 1}
 
+# The nine starting slots (ROSTER_POSITIONS minus the bench) and what the FLEX
+# can hold. Used to seat each team's best player per slot as its starters.
+STARTER_SLOTS = ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DEF"]
+FLEX_ELIGIBLE = ("RB", "WR", "TE")
+
+
+def _fill_starters(by_pos: dict[str, list[str]]) -> list[str]:
+    """Seat a starting lineup from a team's players, best available per slot.
+
+    `by_pos` maps position -> player ids (best first). Fixed slots take the top
+    unused player at their position; FLEX takes the best unused RB/WR/TE."""
+    used: set[str] = set()
+    starters: list[str] = []
+    for slot in STARTER_SLOTS:
+        positions = FLEX_ELIGIBLE if slot == "FLEX" else (slot,)
+        pick = next(
+            (pid for pos in positions for pid in by_pos.get(pos, []) if pid not in used),
+            None,
+        )
+        if pick is not None:
+            used.add(pick)
+            starters.append(pick)
+    return starters
+
+
+async def _extend_unique(ids: list[str], candidates, need: int) -> None:
+    """Append candidate ids not already present, until `need` is reached."""
+    for pid in candidates:
+        if pid in ids:
+            continue
+        ids.append(pid)
+        if len(ids) >= need:
+            return
+
 
 async def _top_player_ids(
     db: AsyncSession, position: str, need: int, season: int
 ) -> list[str]:
-    """Highest-ranked players at `position` — ADP-ordered when profiles exist,
-    otherwise alphabetical by name so tests without draft profiles still work."""
+    """The `need` best players at `position`, in this preference order:
+
+    1. **ADP** when draft profiles exist (the sharpest ordering).
+    2. **Recent fantasy production** otherwise — total PPR points across the
+       seasons already in `player_stats_weekly`. This is what makes the demo
+       roster look real: it picks players who actually scored, so they have
+       projections instead of the alphabetical filler the old fallback gave.
+    3. **Alphabetical** as a last resort, so tests with neither ADP nor stats
+       still fill a roster.
+    """
     ranked = (
         (
             await db.execute(
@@ -90,19 +133,37 @@ async def _top_player_ids(
     if len(ids) >= need:
         return ids
 
-    fallback_q = (
-        select(Player.id)
-        .where(Player.position == position)
-        .order_by(Player.full_name.asc())
-        .limit(need + len(ids))
+    by_production = (
+        (
+            await db.execute(
+                select(Player.id)
+                .join(PlayerStatsWeekly, PlayerStatsWeekly.player_id == Player.id)
+                .where(Player.position == position)
+                .group_by(Player.id)
+                .order_by(func.sum(PlayerStatsWeekly.fantasy_points_ppr).desc())
+                .limit(need + len(ids))
+            )
+        )
+        .scalars()
+        .all()
     )
-    fallback = (await db.execute(fallback_q)).scalars().all()
-    for pid in fallback:
-        if pid in ids:
-            continue
-        ids.append(pid)
-        if len(ids) >= need:
-            break
+    await _extend_unique(ids, by_production, need)
+    if len(ids) >= need:
+        return ids
+
+    alphabetical = (
+        (
+            await db.execute(
+                select(Player.id)
+                .where(Player.position == position)
+                .order_by(Player.full_name.asc())
+                .limit(need + len(ids))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    await _extend_unique(ids, alphabetical, need)
     return ids
 
 
@@ -203,21 +264,33 @@ async def seed_demo_league(db: AsyncSession) -> bool:
     db.add(conn)
     await db.flush()  # assign conn.id
 
-    team_players: list[list[str]] = [[] for _ in range(NUM_TEAMS)]
+    # Deal players out by position: team_by_pos[team][pos] holds that team's
+    # players at each position, best first (snake order keeps it fair).
+    team_by_pos: list[dict[str, list[str]]] = [
+        {pos: [] for pos in POSITION_COUNTS} for _ in range(NUM_TEAMS)
+    ]
     for pos, count in POSITION_COUNTS.items():
         pool = await _top_player_ids(db, pos, NUM_TEAMS * count, settings.current_season)
         for team_idx, ids in enumerate(_snake_distribute(pool, NUM_TEAMS, count)):
-            team_players[team_idx].extend(ids)
+            team_by_pos[team_idx][pos] = list(ids)
 
-    starter_count = sum(1 for slot in ROSTER_POSITIONS if slot != "BN")
-    for team_idx, players in enumerate(team_players):
+    for team_idx in range(NUM_TEAMS):
+        by_pos = {pos: list(ids) for pos, ids in team_by_pos[team_idx].items()}
+        starters = _fill_starters(by_pos)
+        # Full roster = starters, then everyone left over on the bench.
+        bench = [
+            pid
+            for pos in POSITION_COUNTS
+            for pid in team_by_pos[team_idx][pos]
+            if pid not in starters
+        ]
         db.add(
             Roster(
                 connection_id=conn.id,
                 team_id=str(team_idx + 1),
                 owner_name=TEAM_NAMES[team_idx],
-                players=players,
-                starters=players[:starter_count],
+                players=starters + bench,
+                starters=starters,
                 wins=0,
                 losses=0,
                 ties=0,
