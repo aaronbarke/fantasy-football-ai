@@ -23,10 +23,12 @@ from datetime import datetime, timezone
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import GameCondition, NflSchedule, Player, PlayerStatsWeekly
+from app.models import DepthChartEntry, GameCondition, NflSchedule, Player, PlayerStatsWeekly
+from app.services.defense_impact_service import defense_injury_pct
 from app.services.external_proj_service import get_external_projections
 from app.services.opportunity_service import (
     PASS_CATCHER_POSITIONS,
+    _is_absent,
     compute_opportunity_shares,
 )
 from app.services.schedule_service import defense_vs_position_ranks
@@ -66,6 +68,13 @@ PTS_PER_TARGET_SHARE = 45.0
 # absurd projection.
 OPP_BOOST_BASE_FRAC = 0.35
 OPP_BOOST_ABS_CAP = 6.0
+
+# Opponent defensive-injury adjustment (see app.services.defense_impact_service).
+# That module returns a percentage bump; here we apply it to the baseline and
+# cap it, conservatively: at most 12% of baseline or 3.0 absolute points, even
+# if several game-wreckers are out.
+DEF_INJ_PCT_CAP = 0.12
+DEF_INJ_ABS_CAP = 3.0
 
 
 def sleeper_blend_weight(now: datetime | None, kickoff: datetime | None) -> float:
@@ -267,6 +276,11 @@ async def compute_projections(
     # pass-catcher on the teams in play (with their recent target share).
     opp_shares = await _opportunity_shares(db, teams)
 
+    # Opponent defensive-injury context: which opposing defenses have a key
+    # starter out, plus each projected player's own slot/perimeter alignment.
+    opponents = {g["opponent"] for g in next_opponent.values() if g.get("opponent")}
+    def_out_by_opp, alignment = await _defense_injury_context(db, opponents, ids)
+
     # Naive UTC to match the DB's naive game_time for the kickoff ramp.
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -333,6 +347,27 @@ async def compute_projections(
         if opportunity_adj:
             projected = max(0.0, projected + opportunity_adj)
 
+        # Opponent defensive-injury adjustment — additive, and 0.0 when the
+        # opposing defense is at full strength (so healthy slates are unchanged).
+        defense_injury_adj = 0.0
+        defense_reason = None
+        if opponent and p.position:
+            outs = def_out_by_opp.get(opponent, [])
+            if outs:
+                pct, reasons = defense_injury_pct(p.position, alignment.get(p.id), outs)
+                pct = min(pct, DEF_INJ_PCT_CAP)
+                defense_injury_adj = round(min(base * pct, DEF_INJ_ABS_CAP), 1)
+                if defense_injury_adj > 0 and reasons:
+                    # reasons are already "Name (Status)"; just append the total
+                    defense_reason = (
+                        f"vs {opponent} D — {', '.join(reasons)} → "
+                        f"+{defense_injury_adj:.1f}"
+                    )
+                else:
+                    defense_injury_adj = 0.0
+        if defense_injury_adj:
+            projected = max(0.0, projected + defense_injury_adj)
+
         games_played = len(samples)
         cv = sigma / base if base > 0 else 1.0
         confidence = (
@@ -348,12 +383,14 @@ async def compute_projections(
             "confidence": confidence,
             "stdev": round(sigma, 1),
             "boost_reason": boost_reason,
+            "defense_reason": defense_reason,
             "components": {
                 "base_ppg": round(base, 1),
                 "matchup_adj": round(matchup_adj, 1),
                 "vegas_adj": round(vegas_adj, 1),
                 "weather_adj": round(weather_adj, 1),
                 "opportunity_adj": opportunity_adj,
+                "defense_injury_adj": defense_injury_adj,
                 "external_proj": round(ext, 1) if ext is not None else None,
                 "opponent": opponent,
                 "week": game["week"] if game else None,
@@ -434,3 +471,51 @@ async def _opportunity_shares(db: AsyncSession, teams: set[str]) -> dict[str, di
     for team_catchers in by_team.values():
         out.update(compute_opportunity_shares(team_catchers))
     return out
+
+
+async def _defense_injury_context(
+    db: AsyncSession, opponents: set[str], player_ids: list[str]
+) -> tuple[dict[str, list[dict]], dict[str, str | None]]:
+    """Load, from the depth-chart snapshot, (1) each opponent's officially-out
+    *starting* defenders and (2) each projected player's slot/perimeter
+    alignment. Returns ``(out_by_opponent, alignment_by_player_id)``; empty when
+    the depth-chart table hasn't been populated yet (fresh deploy → no bump)."""
+    out_by_opp: dict[str, list[dict]] = defaultdict(list)
+    if opponents:
+        rows = (
+            await db.execute(
+                select(
+                    DepthChartEntry.full_name,
+                    DepthChartEntry.team,
+                    DepthChartEntry.position,
+                    DepthChartEntry.depth_chart_position,
+                    DepthChartEntry.injury_status,
+                ).where(
+                    DepthChartEntry.team.in_(opponents),
+                    DepthChartEntry.depth_chart_order == 1,  # starters only
+                    DepthChartEntry.injury_status.is_not(None),
+                )
+            )
+        ).all()
+        for r in rows:
+            if _is_absent(r.injury_status):  # Out/Doubtful/IR — never Questionable
+                out_by_opp[r.team].append(
+                    {
+                        "name": r.full_name,
+                        "position": r.position,
+                        "slot": r.depth_chart_position,
+                        "status": r.injury_status,
+                    }
+                )
+
+    alignment: dict[str, str | None] = {}
+    if player_ids:
+        arows = (
+            await db.execute(
+                select(DepthChartEntry.id, DepthChartEntry.depth_chart_position).where(
+                    DepthChartEntry.id.in_(player_ids)
+                )
+            )
+        ).all()
+        alignment = {r.id: r.depth_chart_position for r in arows}
+    return out_by_opp, alignment
