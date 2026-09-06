@@ -1,6 +1,18 @@
-"""Injury data from ESPN's public (no-auth) endpoints."""
+"""Injury data from ESPN's public (no-auth) endpoints.
+
+Practice-report granularity (DNP / Limited / Full) is NOT available from this
+feed. Each injury row carries only a game-status designation (``status`` is one
+of Active / Questionable / Doubtful / Out / Injured Reserve / Suspension, and
+``type.name`` merely mirrors it) plus free-text ``shortComment`` / ``longComment``
+that sometimes *mentions* practice in prose but exposes no structured field.
+There is no free API that gives structured practice participation, so we
+deliberately do not store a practice_status (nothing could reliably populate
+it) and do not parse it out of prose. Recorded here so the limitation is
+explicit rather than silently missing.
+"""
 
 import logging
+import re
 
 import httpx
 from sqlalchemy import select, update
@@ -11,6 +23,20 @@ from app.models import InjuryEvent, Player
 logger = logging.getLogger(__name__)
 
 INJURIES_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries"
+
+# ESPN's injuries feed no longer carries a numeric ``athlete.id``; the id only
+# appears inside player links (…/nfl/player/_/id/<id>/name). Pull it from there.
+_ESPN_ID_RE = re.compile(r"/id/(\d+)/")
+
+
+def _espn_id(athlete: dict) -> str:
+    if athlete.get("id"):  # tolerate the old shape if it ever returns
+        return str(athlete["id"])
+    for link in athlete.get("links") or []:
+        m = _ESPN_ID_RE.search(link.get("href") or "")
+        if m:
+            return m.group(1)
+    return ""
 
 
 async def fetch_injuries() -> list[dict]:
@@ -28,7 +54,7 @@ async def fetch_injuries() -> list[dict]:
             details = inj.get("details") or {}
             out.append(
                 {
-                    "espn_id": str(athlete.get("id", "")),
+                    "espn_id": _espn_id(athlete),
                     "name": athlete.get("displayName", ""),
                     "status": inj.get("status"),
                     "body_part": details.get("type"),

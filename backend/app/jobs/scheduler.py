@@ -3,7 +3,8 @@
 Cadence:
 - Weekly stats: Tuesday 6 AM CT (Monday night stats finalize overnight)
 - Player pool: daily 5 AM CT (Sleeper asks for max 1 call/day on /players/nfl)
-- Injuries: every 4 hours
+- Injuries: every 2h on non-game days; every 30 min during game-day windows
+  (Thu/Sun/Mon 9a–11p CT) to catch late scratches and inactives near kickoff
 - Player news: every 2 hours (camp intel moves draft stock fast)
 - Draft data (ADP/projections): 5 AM + 5 PM CT — ADP moves fast in August
 - Odds: 8 AM + 8 PM CT (free tier budget: 500 req/month)
@@ -193,10 +194,19 @@ def start_scheduler() -> None:
         id="player_pool",
         misfire_grace_time=3600,
     )
+    # Injuries: a single GET per run, so cadence is cheap. Poll lightly on
+    # non-game days and aggressively during game-day windows (Thu/Sun/Mon) to
+    # catch designations and pre-kickoff inactives, which move projections most.
     scheduler.add_job(
         job_refresh_injuries,
-        IntervalTrigger(hours=4),
+        CronTrigger(day_of_week="tue,wed,fri,sat", hour="*/2"),
         id="injuries",
+        misfire_grace_time=600,
+    )
+    scheduler.add_job(
+        job_refresh_injuries,
+        CronTrigger(day_of_week="thu,sun,mon", hour="9-23", minute="*/30"),
+        id="injuries_gameday",
         misfire_grace_time=600,
     )
     scheduler.add_job(
