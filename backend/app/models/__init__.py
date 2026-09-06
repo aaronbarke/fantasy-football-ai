@@ -1,4 +1,5 @@
 from app.models.chat import ChatMessage
+from app.models.depth import DepthChartEntry
 from app.models.draft import PlayerDraftProfile
 from app.models.game import GameCondition
 from app.models.league import LeagueConnection
@@ -29,4 +30,5 @@ __all__ = [
     "PlayerNews",
     "MockDraft",
     "MockDraftPick",
+    "DepthChartEntry",
 ]

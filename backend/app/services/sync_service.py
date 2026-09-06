@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     AvailablePlayer,
+    DepthChartEntry,
     LeagueConnection,
     Matchup,
     Player,
@@ -25,6 +26,38 @@ from app.utils.player_id_map import espn_to_sleeper_map
 
 logger = logging.getLogger(__name__)
 
+# Defensive positions Sleeper exposes, kept in the depth_chart snapshot so the
+# projection model can react to opposing defenders being out. Offensive skill
+# players are stored too (WR/TE/RB) purely for their slot/perimeter alignment.
+_DEFENSIVE_POSITIONS = {"DE", "DT", "NT", "DL", "LB", "ILB", "OLB", "CB", "S", "FS", "SS", "DB"}
+_ALIGNMENT_POSITIONS = {"WR", "TE", "RB"}
+
+
+async def _upsert_depth_chart(db: AsyncSession, pid: str, p: dict) -> None:
+    """Store a depth-chart / alignment row for defenders (all) and for skill
+    receivers that carry an alignment tag. Skips everyone else."""
+    position = p.get("position")
+    team = p.get("team")
+    dcp = p.get("depth_chart_position")
+    keep = bool(team) and (
+        position in _DEFENSIVE_POSITIONS
+        or (position in _ALIGNMENT_POSITIONS and dcp)
+    )
+    if not keep:
+        return
+    entry = await db.get(DepthChartEntry, pid)
+    if entry is None:
+        entry = DepthChartEntry(id=pid)
+        db.add(entry)
+    entry.full_name = p.get("full_name") or entry.full_name or pid
+    entry.team = team
+    entry.position = position
+    entry.depth_chart_position = dcp
+    entry.depth_chart_order = p.get("depth_chart_order")
+    if p.get("espn_id"):
+        entry.espn_id = str(p["espn_id"])
+    # keep any injury_status already stamped by the injury sync
+
 
 async def sync_player_pool(db: AsyncSession) -> int:
     """Refresh the players master table from Sleeper's full player dump.
@@ -38,6 +71,9 @@ async def sync_player_pool(db: AsyncSession) -> int:
     count = 0
     for pid, p in all_players.items():
         position = p.get("position")
+        # Depth-chart snapshot covers defenders + skill-player alignment, which
+        # live outside the fantasy player pool, so handle it before the filter.
+        await _upsert_depth_chart(db, pid, p)
         if position not in FANTASY_POSITIONS:
             continue
         player = await db.get(Player, pid)

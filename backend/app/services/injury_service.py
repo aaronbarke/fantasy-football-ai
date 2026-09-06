@@ -18,7 +18,7 @@ import httpx
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import InjuryEvent, Player
+from app.models import DepthChartEntry, InjuryEvent, Player
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,9 @@ async def sync_injuries(db: AsyncSession) -> list[InjuryEvent]:
 
     # Clear stale statuses first so recoveries show as healthy
     await db.execute(update(Player).values(injury_status=None, injury_body_part=None))
+    # Same for the depth-chart snapshot (offense alignment + defenders), which
+    # feeds the opponent defensive-injury adjustment.
+    await db.execute(update(DepthChartEntry).values(injury_status=None))
 
     events: list[InjuryEvent] = []
     count = 0
@@ -99,6 +102,11 @@ async def sync_injuries(db: AsyncSession) -> list[InjuryEvent]:
             .values(injury_status=inj["status"], injury_body_part=inj["body_part"])
         )
         count += result.rowcount or 0
+        await db.execute(
+            update(DepthChartEntry)
+            .where(DepthChartEntry.espn_id == inj["espn_id"])
+            .values(injury_status=inj["status"])
+        )
 
         prev = before.get(inj["espn_id"])
         if prev and prev[1] != inj["status"] and _is_severe(inj["status"]):
