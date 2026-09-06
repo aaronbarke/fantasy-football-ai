@@ -3,10 +3,16 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Navbar from "@/components/Navbar";
+import { EmptyState, LoadingState, ErrorState } from "@/components/PageState";
+import PageHeader from "@/components/PageHeader";
 import PlayerCard from "@/components/PlayerCard";
 import StatChart from "@/components/StatChart";
 import { api } from "@/lib/api";
-import type { PlayerCard as PlayerCardType, Roster, WeeklyStat } from "@/lib/types";
+import type {
+  PlayerCard as PlayerCardType,
+  Roster,
+  WeeklyStat,
+} from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
 import { X } from "lucide-react";
 
@@ -14,7 +20,12 @@ export default function RosterPage() {
   const { league } = useLeague();
   const [selected, setSelected] = useState<PlayerCardType | null>(null);
 
-  const { data: roster, isLoading } = useQuery({
+  const {
+    data: roster,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ["roster", league?.id],
     queryFn: () => api<Roster>(`/api/leagues/${league!.id}/roster`),
     enabled: !!league,
@@ -30,22 +41,36 @@ export default function RosterPage() {
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-6xl px-4 py-8">
-        <h1 className="text-2xl font-bold">Roster</h1>
-        {isLoading && <p className="mt-4 text-sm text-gray-400">Loading…</p>}
-        {!isLoading && !roster && (
-          <p className="mt-4 text-sm text-gray-400">
-            No roster found. Sync your league from the dashboard.
-          </p>
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-6xl px-4 py-8"
+      >
+        <PageHeader
+          title="Your roster"
+          description="Your team, player details, and recent form. Select a player to take a closer look."
+          eyebrow="Know your team"
+        />
+        {isLoading && <LoadingState label="Loading your roster…" />}
+        {error && <ErrorState retry={() => void refetch()} />}
+        {!isLoading && !error && !roster && (
+          <EmptyState
+            title="Your roster is on its way"
+            description="Refresh your league from Overview to bring in your players and starters."
+            href="/dashboard"
+            action="Go to overview"
+          />
         )}
 
         {roster &&
           roster.starters.length === 0 &&
           roster.bench.length === 0 && (
-            <p className="mt-4 text-sm text-gray-400">
-              Your roster is empty. Your league hasn&apos;t drafted yet. Check
-              back after draft day and hit Sync.
-            </p>
+            <EmptyState
+              title="Your team starts on draft day"
+              description="No players are on your roster yet. Explore the draft room now, then refresh your league from Overview after your draft."
+              href="/draft"
+              action="Explore the draft room"
+            />
           )}
 
         {roster && (roster.starters.length > 0 || roster.bench.length > 0) && (
@@ -99,7 +124,9 @@ export default function RosterPage() {
                   <h3 className="text-lg font-bold">{selected.name}</h3>
                   <p className="text-sm text-gray-500">
                     {selected.position} · {selected.team ?? "FA"}
-                    {selected.injury_status ? ` · ${selected.injury_status}` : ""}
+                    {selected.injury_status
+                      ? ` · ${selected.injury_status}`
+                      : ""}
                   </p>
                 </div>
                 <button

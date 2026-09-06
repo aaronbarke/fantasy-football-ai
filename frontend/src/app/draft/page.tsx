@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import Navbar from "@/components/Navbar";
+import { EmptyState, ErrorState } from "@/components/PageState";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import { injuryColor, positionColor, timeAgo } from "@/lib/utils";
@@ -88,7 +89,8 @@ interface LivePick {
 }
 
 interface LiveDraft {
-  status: "not_started" | "in_progress" | "complete" | "unavailable" | "auth_expired";
+  status:
+    "not_started" | "in_progress" | "complete" | "unavailable" | "auth_expired";
   total_picks: number;
   picks_made: number;
   your_team_id: string | null;
@@ -116,7 +118,8 @@ function erf(x: number): number {
   const t = 1 / (1 + 0.3275911 * ax);
   const y =
     1 -
-    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t +
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) *
+      t +
       0.254829592) *
       t *
       Math.exp(-ax * ax);
@@ -126,7 +129,7 @@ function erf(x: number): number {
 function availabilityAt(
   adp: number | null,
   stdev: number | null,
-  pick: number | null
+  pick: number | null,
 ): number | null {
   if (adp == null || pick == null) return null;
   if (!stdev || stdev <= 0) return adp > pick ? 1 : 0;
@@ -208,8 +211,9 @@ function CookieExpiredBanner() {
         </p>
         <p className="mt-0.5 text-xs text-red-700 dark:text-red-400">
           Live sync can&apos;t read your draft until you reconnect with fresh
-          espn_s2 and SWID cookies. Picks won&apos;t auto-mark until then, but you
-          can keep drafting with the manual “My pick / Gone” buttons in the meantime.
+          espn_s2 and SWID cookies. Picks won&apos;t auto-mark until then, but
+          you can keep drafting with the manual “My pick / Gone” buttons in the
+          meantime.
         </p>
       </div>
       <Link
@@ -224,7 +228,9 @@ function CookieExpiredBanner() {
 
 export default function DraftPage() {
   const { league } = useLeague({ requireLeague: false });
-  const [manualDrafted, setManualDrafted] = useState<Record<string, DraftMark>>({});
+  const [manualDrafted, setManualDrafted] = useState<Record<string, DraftMark>>(
+    {},
+  );
   const [filter, setFilter] = useState("ALL");
   const [teams, setTeams] = useState(12);
   const [slot, setSlot] = useState(1);
@@ -254,7 +260,8 @@ export default function DraftPage() {
   }, []);
 
   useEffect(() => {
-    if (loaded) localStorage.setItem(SETTINGS_KEY, JSON.stringify({ teams, slot }));
+    if (loaded)
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ teams, slot }));
   }, [teams, slot, loaded]);
 
   function mark(id: string, value: DraftMark | null) {
@@ -279,9 +286,10 @@ export default function DraftPage() {
     queryFn: () =>
       api<LiveDraft>(
         `/api/draft/live?connection_id=${league!.id}` +
-          (demoMode ? `&demo_picks=${demoPicks}` : "")
+          (demoMode ? `&demo_picks=${demoPicks}` : ""),
       ),
-    enabled: !externalSync && liveActive && !!league?.id && (isEspn || demoMode),
+    enabled:
+      !externalSync && liveActive && !!league?.id && (isEspn || demoMode),
     refetchInterval: demoMode ? false : 6000,
   });
 
@@ -317,11 +325,16 @@ export default function DraftPage() {
     return manualDrafted;
   }, [liveActive, live, manualDrafted]);
 
-  const { data, isLoading } = useQuery({
+  const {
+    data,
+    isLoading,
+    error: boardError,
+    refetch: reloadBoard,
+  } = useQuery({
     queryKey: ["draftBoard", league?.id],
     queryFn: () =>
       api<BoardResponse>(
-        `/api/draft/board?limit=450${league ? `&connection_id=${league.id}` : ""}`
+        `/api/draft/board?limit=450${league ? `&connection_id=${league.id}` : ""}`,
       ),
     staleTime: 30 * 60_000,
   });
@@ -355,7 +368,7 @@ export default function DraftPage() {
   }, [board, data]);
   const myIds = useMemo(
     () => Object.keys(drafted).filter((id) => drafted[id] === "me"),
-    [drafted]
+    [drafted],
   );
   const totalPicked = Object.keys(drafted).length;
 
@@ -388,7 +401,7 @@ export default function DraftPage() {
   const available = board.filter((p) => !drafted[p.player_id]);
   const filtered = useMemo(
     () => available.filter((p) => filter === "ALL" || p.position === filter),
-    [available, filter]
+    [available, filter],
   );
   // When live/preview, each of your picks carries the round it was made in — so
   // the roster can read in true draft order instead of a jumble.
@@ -416,21 +429,30 @@ export default function DraftPage() {
       return [...cards].sort(
         (a, b) =>
           (myPickRound[a.player_id]?.overall ?? 1e9) -
-          (myPickRound[b.player_id]?.overall ?? 1e9)
+          (myPickRound[b.player_id]?.overall ?? 1e9),
       );
     }
     return cards;
   }, [drafted, nameById, myPickRound]);
 
   const { data: rec, isFetching: recLoading } = useQuery({
-    queryKey: ["draftRecommend", league?.id, myIds.join(","), totalPicked, teams, slot],
+    queryKey: [
+      "draftRecommend",
+      league?.id,
+      myIds.join(","),
+      totalPicked,
+      teams,
+      slot,
+    ],
     queryFn: () =>
       api<RecommendResponse>("/api/draft/recommend", {
         method: "POST",
         body: JSON.stringify({
           connection_id: league?.id ?? null,
           my_player_ids: myIds,
-          drafted_ids: Object.keys(drafted).filter((id) => drafted[id] === "gone"),
+          drafted_ids: Object.keys(drafted).filter(
+            (id) => drafted[id] === "gone",
+          ),
           next_pick: nextPick,
           following_pick: followingPick,
           limit: 4,
@@ -449,7 +471,9 @@ export default function DraftPage() {
         body: JSON.stringify({
           connection_id: league?.id ?? null,
           my_player_ids: myIds,
-          drafted_ids: Object.keys(drafted).filter((id) => drafted[id] === "gone"),
+          drafted_ids: Object.keys(drafted).filter(
+            (id) => drafted[id] === "gone",
+          ),
           next_pick: nextPick,
           following_pick: followingPick,
         }),
@@ -457,7 +481,7 @@ export default function DraftPage() {
       setAdvice(resp.analysis);
     } catch (err) {
       setAdvice(
-        `Something went wrong: ${err instanceof Error ? err.message : "unknown"}`
+        `Something went wrong: ${err instanceof Error ? err.message : "unknown"}`,
       );
     } finally {
       setBusy(false);
@@ -469,14 +493,24 @@ export default function DraftPage() {
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-6xl px-4 py-8">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-6xl px-4 py-8"
+      >
+        <div className="page-heading">
           <div>
-            <h1 className="text-2xl font-bold">Draft room</h1>
-            <p className="mt-1 text-sm text-gray-500">
-              Consensus ADP from ESPN and real mock drafts, our own season
-              projections, and value over replacement. {data?.scoring ?? "ppr"}{" "}
-              scoring, {data?.league_size ?? teams}-team.
+            <p className="eyebrow">Make every pick count</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+              Your draft room.
+            </h1>
+            <p className="page-description">
+              Find your next pick. Track who’s available, compare value, and
+              build your roster.
+            </p>
+            <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-green-700">
+              {(data?.scoring ?? "ppr").replace("_", "-")} ·{" "}
+              {data?.league_size ?? teams} teams
             </p>
           </div>
           <button
@@ -548,8 +582,8 @@ export default function DraftPage() {
             {demoMode && live && (
               <span className="text-sm text-gray-600">
                 Preview · {live.picks_made}/{live.total_picks} picked
-                {live.on_the_clock?.is_you ? " · you're on the clock" : ""}. This
-                is a dry run, not your real draft.
+                {live.on_the_clock?.is_you ? " · you're on the clock" : ""}.
+                This is a dry run, not your real draft.
               </span>
             )}
             {liveSync && (live?.unmapped_count ?? 0) > 0 && (
@@ -563,7 +597,9 @@ export default function DraftPage() {
         {/* Expired-cookie banner — applies to either sync path (live is the
             merged connected/external state). This is the one mid-draft failure
             the user has to act on, so it gets a loud banner, not an inline note. */}
-        {liveActive && live?.status === "auth_expired" && <CookieExpiredBanner />}
+        {liveActive && live?.status === "auth_expired" && (
+          <CookieExpiredBanner />
+        )}
 
         {/* External ESPN sync — paste any ESPN league ID to follow that draft */}
         <div
@@ -605,7 +641,10 @@ export default function DraftPage() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => { setExternalId(""); setExternalInput(""); }}
+                  onClick={() => {
+                    setExternalId("");
+                    setExternalInput("");
+                  }}
                   className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700"
                 >
                   Disconnect
@@ -634,9 +673,10 @@ export default function DraftPage() {
           </div>
           {!externalSync && (
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              Paste the league ID from any ESPN draft URL (or the full URL). Works
-              with the ESPN Mock Draft Lobby: join a lobby mock, copy the league
-              ID from the URL bar, and paste it here to watch picks sync live.
+              Paste the league ID from any ESPN draft URL (or the full URL).
+              Works with the ESPN Mock Draft Lobby: join a lobby mock, copy the
+              league ID from the URL bar, and paste it here to watch picks sync
+              live.
             </p>
           )}
         </div>
@@ -677,9 +717,7 @@ export default function DraftPage() {
             <span className="text-gray-500">
               Round <span className="font-semibold text-gray-900">{round}</span>
             </span>
-            <span className="text-gray-500">
-              {totalPicked} off the board
-            </span>
+            <span className="text-gray-500">{totalPicked} off the board</span>
             {nextPick && (
               <span className="rounded-lg bg-green-600 px-3 py-1 font-semibold text-white">
                 You pick #{nextPick}
@@ -691,8 +729,8 @@ export default function DraftPage() {
 
         <div className="mt-6 grid gap-6 lg:grid-cols-3">
           {/* Board */}
-          <div className="lg:col-span-2">
-            <div className="flex items-center justify-between">
+          <div className="min-w-0 lg:col-span-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap gap-1.5">
                 {POSITIONS.map((p) => (
                   <button
@@ -721,18 +759,25 @@ export default function DraftPage() {
             {isLoading && (
               <p className="mt-6 text-sm text-gray-400">Loading the board…</p>
             )}
-            {!isLoading && board.length === 0 && (
-              <p className="mt-6 text-sm text-gray-400">
-                No draft data yet. Run the draft-data sync to pull ADP and
-                projections.
-              </p>
+            {boardError && (
+              <ErrorState
+                message="The draft board couldn’t load."
+                retry={() => void reloadBoard()}
+              />
+            )}
+            {!isLoading && !boardError && board.length === 0 && (
+              <EmptyState
+                title="Your board is warming up"
+                description="Rankings will appear when this season’s draft data is available. Check back before your draft."
+              />
             )}
 
             <ul className="mt-3 max-h-[65vh] space-y-1.5 overflow-y-auto pr-1">
               {filtered.slice(0, 150).map((p, i) => {
                 const prev = filtered[i - 1];
                 const tierBreak =
-                  prev && (prev.position !== p.position || prev.tier !== p.tier);
+                  prev &&
+                  (prev.position !== p.position || prev.tier !== p.tier);
                 const avail = availabilityAt(p.adp, p.adp_stdev, followingPick);
                 const news = data?.news?.[p.player_id];
                 return (
@@ -747,7 +792,7 @@ export default function DraftPage() {
                       </div>
                     )}
                     <div
-                      className={`flex items-center gap-2.5 rounded-lg border bg-white p-2.5 ${
+                      className={`flex flex-wrap items-center gap-2.5 rounded-lg border bg-white p-2.5 ${
                         p.is_tier_end
                           ? "border-amber-300 dark:border-amber-500/40"
                           : "border-gray-200"
@@ -761,11 +806,14 @@ export default function DraftPage() {
                       >
                         {p.position}
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="flex items-center gap-1.5 truncate text-sm font-semibold">
+                      <div className="min-w-0 w-[calc(100%-80px)] sm:w-auto sm:flex-1">
+                        <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold">
                           {p.name}
                           <TierBadge tier={p.tier} />
-                          <ValueBadge score={p.value_score} delta={p.adp_delta} />
+                          <ValueBadge
+                            score={p.value_score}
+                            delta={p.adp_delta}
+                          />
                           <EspnEdgeBadge edge={p.market_edge} />
                           {p.injury_status && (
                             <span
@@ -836,7 +884,7 @@ export default function DraftPage() {
           </div>
 
           {/* Recommendations + roster */}
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <div className="rounded-xl border border-gray-200 bg-white p-5">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
                 Best available{nextPick ? ` at #${nextPick}` : ""}
@@ -894,7 +942,11 @@ export default function DraftPage() {
                       className={`flex items-center gap-2 text-sm ${p.is_you ? "font-semibold" : ""}`}
                     >
                       <span className="w-10 shrink-0 text-xs text-gray-400">
-                        {p.round}.{String(((p.overall_pick - 1) % teams) + 1).padStart(2, "0")}
+                        {p.round}.
+                        {String(((p.overall_pick - 1) % teams) + 1).padStart(
+                          2,
+                          "0",
+                        )}
                       </span>
                       {p.player && (
                         <span
@@ -936,7 +988,10 @@ export default function DraftPage() {
               </div>
               <ul className="mt-3 space-y-1.5">
                 {myPlayers.map((p) => (
-                  <li key={p.player_id} className="flex items-center gap-2 text-sm">
+                  <li
+                    key={p.player_id}
+                    className="flex items-center gap-2 text-sm"
+                  >
                     {myPickRound[p.player_id] && (
                       <span className="w-7 shrink-0 text-[10px] font-semibold text-gray-400">
                         R{myPickRound[p.player_id].round}
@@ -947,7 +1002,9 @@ export default function DraftPage() {
                     >
                       {p.position}
                     </span>
-                    <span className="flex-1 truncate font-medium">{p.name}</span>
+                    <span className="flex-1 truncate font-medium">
+                      {p.name}
+                    </span>
                     <span className="text-xs text-gray-400">
                       {p.bye_week ? `bye ${p.bye_week}` : ""}
                     </span>
@@ -976,7 +1033,9 @@ export default function DraftPage() {
 
             {advice && (
               <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm leading-relaxed">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{advice}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {advice}
+                </ReactMarkdown>
               </div>
             )}
           </div>

@@ -7,7 +7,7 @@ import ChatMessageBubble from "@/components/ChatMessage";
 import { api, apiStream } from "@/lib/api";
 import type { ChatMessage } from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
-import { Send, Square } from "lucide-react";
+import { Send, Square, ArrowUpRight, MessageSquare } from "lucide-react";
 
 const starters = [
   "Who should I start at FLEX this week?",
@@ -52,7 +52,11 @@ function ChatInner() {
     const q = text.trim();
     if (!q || busy) return;
     setInput("");
-    setMessages((m) => [...m, { role: "user", content: q }, { role: "assistant", content: "" }]);
+    setMessages((m) => [
+      ...m,
+      { role: "user", content: q },
+      { role: "assistant", content: "" },
+    ]);
     setBusy(true);
     abortRef.current = new AbortController();
     try {
@@ -67,7 +71,7 @@ function ChatInner() {
             return next;
           });
         },
-        abortRef.current.signal
+        abortRef.current.signal,
       );
       // Strip the PICK: line the backend uses for accuracy tracking
       setMessages((m) => {
@@ -111,27 +115,49 @@ function ChatInner() {
   }, [params, loaded, league]);
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="chat-page flex h-dvh flex-col">
       <Navbar />
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-hidden px-4">
-        <div className="flex-1 space-y-4 overflow-y-auto py-6">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-hidden px-4"
+      >
+        <div className="chat-heading">
+          <div>
+            <p className="eyebrow">Think it through</p>
+            <h1>Your assistant</h1>
+          </div>
+          <span className="chat-context">
+            {league?.league_name ?? "Your league"}
+          </span>
+        </div>
+        <div className="chat-scroll flex-1 space-y-5 overflow-y-auto py-6">
           {messages.length === 0 && loaded && (
-            <div className="mt-16 text-center">
-              <h2 className="text-xl font-bold">
-                Ask anything about {league?.league_name ?? "your league"}
-              </h2>
-              <p className="mt-1 text-sm text-gray-500">
-                The AI sees your roster, matchup, waivers, injuries, Vegas lines,
-                and weather.
+            <div className="chat-welcome">
+              <span className="empty-state-icon">
+                <MessageSquare className="h-6 w-6" />
+              </span>
+              <p className="eyebrow">Your league. A little perspective.</p>
+              <h2>What’s your next move?</h2>
+              <p>
+                Talk through a close call, explore a trade, or get a second look
+                at your lineup.
               </p>
-              <div className="mx-auto mt-6 flex max-w-md flex-col gap-2">
-                {starters.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => send(s)}
-                    className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm hover:border-green-400 hover:bg-green-50"
-                  >
-                    {s}
+              <div className="chat-prompts">
+                {starters.map((s, i) => (
+                  <button key={s} onClick={() => send(s)}>
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-green-700">
+                      {
+                        [
+                          "Set your lineup",
+                          "Scout the matchup",
+                          "Explore a trade",
+                          "Find an addition",
+                        ][i]
+                      }
+                    </span>
+                    <span className="mt-3 block text-sm leading-6">{s}</span>
+                    <ArrowUpRight className="mt-4 h-4 w-4 text-gray-400" />
                   </button>
                 ))}
               </div>
@@ -158,8 +184,14 @@ function ChatInner() {
             ))}
             <button
               onClick={async () => {
-                if (!league || !window.confirm("Clear this league's chat history?")) return;
-                await api(`/api/chat/history?connection_id=${league.id}`, { method: "DELETE" });
+                if (
+                  !league ||
+                  !window.confirm("Clear this league's chat history?")
+                )
+                  return;
+                await api(`/api/chat/history?connection_id=${league.id}`, {
+                  method: "DELETE",
+                });
                 setMessages([]);
               }}
               className="ml-auto rounded-full px-3 py-1 text-xs text-gray-400 hover:text-red-500"
@@ -173,13 +205,14 @@ function ChatInner() {
             e.preventDefault();
             send(input);
           }}
-          className="flex gap-2 border-t border-gray-200 py-4"
+          className="chat-composer"
         >
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Should I start Chase or Lamb this week?"
-            className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-green-500 focus:outline-none"
+            aria-label="Your fantasy football question"
+            placeholder="Ask about your lineup, a trade, or a player…"
+            className="min-w-0 flex-1 rounded-lg border-0 bg-transparent px-3 py-2.5 text-sm"
           />
           {busy ? (
             <button
@@ -193,7 +226,7 @@ function ChatInner() {
           ) : (
             <button
               type="submit"
-              disabled={!input.trim()}
+              disabled={!input.trim() || !league}
               className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
               aria-label="Send"
             >
@@ -201,6 +234,10 @@ function ChatInner() {
             </button>
           )}
         </form>
+        <p className="chat-note">
+          Use the analysis as a starting point. Confirm player status before
+          making a move.
+        </p>
       </main>
     </div>
   );

@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
+import { EmptyState, LoadingState, ErrorState } from "@/components/PageState";
+import PageHeader from "@/components/PageHeader";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import { positionColor } from "@/lib/utils";
@@ -36,7 +38,8 @@ function cellColor(rank: number | null): string {
   if (rank == null) return "bg-gray-100 text-gray-400";
   if (rank <= 8) return "bg-green-100 text-green-800";
   if (rank <= 16) return "bg-green-50 text-green-700";
-  if (rank <= 24) return "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300";
+  if (rank <= 24)
+    return "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300";
   return "bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300";
 }
 
@@ -45,11 +48,11 @@ export default function SchedulePage() {
   const router = useRouter();
   const [window, setWindow] = useState<"upcoming" | "playoffs">("upcoming");
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["schedule-strength", league?.id, window],
     queryFn: () =>
       api<StrengthData>(
-        `/api/leagues/${league!.id}/schedule-strength?window=${window}`
+        `/api/leagues/${league!.id}/schedule-strength?window=${window}`,
       ),
     enabled: !!league,
     retry: false,
@@ -59,19 +62,24 @@ export default function SchedulePage() {
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-6xl px-4 py-8">
-        <h1 className="text-2xl font-bold">Schedule strength</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Matchup difficulty for your roster. Green = the opponent allows a lot
-          of fantasy points to that position; red = tough matchup.
-          {data ? ` Based on ${data.stats_season} defensive stats.` : ""}
-        </p>
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-6xl px-4 py-8"
+      >
+        <PageHeader
+          title="Look ahead"
+          description="Explore upcoming opponents and spot favorable stretches for your roster."
+          eyebrow="Schedule strength"
+        />
 
         <div className="mt-4 inline-flex rounded-lg border border-gray-200 p-0.5 dark:border-gray-800">
-          {([
-            ["upcoming", "Upcoming"],
-            ["playoffs", "Fantasy playoffs (Wk 15–17)"],
-          ] as const).map(([key, label]) => (
+          {(
+            [
+              ["upcoming", "Upcoming"],
+              ["playoffs", "Fantasy playoffs (Wk 15–17)"],
+            ] as const
+          ).map(([key, label]) => (
             <button
               key={key}
               onClick={() => setWindow(key)}
@@ -86,12 +94,12 @@ export default function SchedulePage() {
           ))}
         </div>
 
-        {isLoading && <p className="mt-6 text-sm text-gray-400">Crunching the schedule…</p>}
+        {isLoading && <LoadingState label="Looking at upcoming matchups…" />}
         {error ? (
-          <p className="mt-6 text-sm text-gray-400">
-            No data yet. This fills in once your roster has players (after
-            your draft, hit Sync on the dashboard).
-          </p>
+          <ErrorState
+            message="We couldn’t load your schedule. Check that your league has a roster, then try again."
+            retry={() => void refetch()}
+          />
         ) : null}
         {data && data.players.length === 0 && (
           <p className="mt-6 text-sm text-gray-400">
@@ -114,7 +122,10 @@ export default function SchedulePage() {
               </thead>
               <tbody>
                 {data.players.map((p) => (
-                  <tr key={p.id} className="border-b border-gray-50 last:border-0">
+                  <tr
+                    key={p.id}
+                    className="border-b border-gray-50 last:border-0"
+                  >
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-2">
                         <span
@@ -122,7 +133,9 @@ export default function SchedulePage() {
                         >
                           {p.position}
                         </span>
-                        <span className="whitespace-nowrap font-medium">{p.name}</span>
+                        <span className="whitespace-nowrap font-medium">
+                          {p.name}
+                        </span>
                         <span className="text-xs text-gray-400">{p.team}</span>
                       </div>
                     </td>
@@ -133,8 +146,8 @@ export default function SchedulePage() {
                             onClick={() =>
                               router.push(
                                 `/chat?q=${encodeURIComponent(
-                                  `How does ${p.name}'s week ${c.week} matchup against ${c.opponent} look?`
-                                )}`
+                                  `How does ${p.name}'s week ${c.week} matchup against ${c.opponent} look?`,
+                                )}`,
                               )
                             }
                             title={

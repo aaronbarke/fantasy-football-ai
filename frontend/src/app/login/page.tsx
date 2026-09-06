@@ -4,7 +4,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { setTokens } from "@/lib/api";
 import type { TokenResponse } from "@/lib/types";
-import { Sparkles, Trophy } from "lucide-react";
+import { ArrowRight, Sparkles } from "lucide-react";
+import Brand from "@/components/Brand";
+import PlaybookField from "@/components/PlaybookField";
+import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
@@ -16,7 +19,10 @@ interface GoogleId {
         client_id: string;
         callback: (resp: { credential: string }) => void;
       }) => void;
-      renderButton: (parent: HTMLElement, options: Record<string, unknown>) => void;
+      renderButton: (
+        parent: HTMLElement,
+        options: Record<string, unknown>,
+      ) => void;
     };
   };
 }
@@ -40,7 +46,7 @@ export default function LoginPage() {
       setTokens(data.access_token, data.refresh_token);
       router.push("/dashboard");
     },
-    [router]
+    [router],
   );
 
   async function post(path: string, body?: unknown) {
@@ -66,7 +72,7 @@ export default function LoginPage() {
   const onGoogleCredential = useCallback(
     (credential: string) => post(`/api/auth/google`, { credential }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    [],
   );
 
   // Load Google Identity Services and render its button when configured.
@@ -110,135 +116,127 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-gray-200/70 bg-white p-8 dark:border-gray-800/70">
-        {/* Brand */}
-        <div className="flex items-center justify-center gap-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-600 text-white">
-            <Trophy className="h-5 w-5" />
-          </span>
-          <span className="text-lg font-extrabold tracking-tight text-gray-900 dark:text-gray-100">
-            FF<span className="text-green-600 dark:text-green-400">AI</span>
-          </span>
-        </div>
-
-        <h1 className="mt-6 text-center text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
-          {mode === "login" ? "Welcome back" : "Create your account"}
-        </h1>
-        <p className="mt-1 text-center text-sm text-gray-500">
-          {mode === "login"
-            ? "Sign in to your fantasy assistant."
-            : "Your AI co-manager for the season."}
-        </p>
-
-        {/* Google sign-in */}
-        <div className="mt-6 flex justify-center">
-          {GOOGLE_CLIENT_ID ? (
-            <div ref={googleBtnRef} />
-          ) : (
-            <button
-              type="button"
-              onClick={() =>
-                setError(
-                  "Google sign-in isn't set up yet. Add a Google Client ID (see SETUP_GOOGLE_OAUTH.md)."
-                )
-              }
-              className="flex w-full items-center justify-center gap-2 rounded-full border border-gray-300 bg-white py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
-              <GoogleGlyph /> Continue with Google
-            </button>
-          )}
-        </div>
-
-        {/* Divider */}
-        <div className="my-5 flex items-center gap-3">
-          <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
-          <span className="text-xs font-medium uppercase tracking-wider text-gray-400">
-            or
-          </span>
-          <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
-        </div>
-
-        {/* Email / password */}
-        <form onSubmit={submit} className="space-y-3">
-          <input
-            type="email"
-            required
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none dark:border-gray-700"
-          />
-          <input
-            type="password"
-            required
-            minLength={8}
-            placeholder="Password (8+ characters)"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none dark:border-gray-700"
-          />
-          {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full rounded-lg bg-green-600 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            {busy ? "Working…" : mode === "login" ? "Sign in" : "Create account"}
-          </button>
-        </form>
-
-        <button
-          onClick={() => {
-            setMode(mode === "login" ? "register" : "login");
-            setError(null);
-          }}
-          className="mt-4 w-full text-center text-sm text-green-700 hover:underline dark:text-green-400"
-        >
-          {mode === "login"
-            ? "New here? Create an account"
-            : "Already have an account? Sign in"}
-        </button>
-
-        {/* Demo escape hatch */}
-        <div className="mt-6 border-t border-gray-100 pt-5 dark:border-gray-800">
-          <button
-            onClick={() => post(`/api/auth/demo`)}
-            disabled={busy}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-green-200 bg-green-50 py-2.5 text-sm font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50 dark:border-green-800/50 dark:bg-green-950/40 dark:text-green-300 dark:hover:bg-green-900/40"
-          >
-            <Sparkles className="h-4 w-4" />
-            Just exploring? Try the demo
-          </button>
-          <p className="mt-2 text-center text-xs text-gray-400">
-            Jump in instantly. No account needed.
+    <main className="auth-page">
+      <aside className="auth-story">
+        <Brand href="/" light />
+        <h2>Your next great call starts here.</h2>
+        <PlaybookField />
+        <p>YOUR ROSTER. YOUR RESEARCH. ONE WORKSPACE.</p>
+      </aside>
+      <div className="auth-form-area">
+        <div className="auth-form">
+          <div className="mb-10 sm:hidden">
+            <Brand href="/" />
+          </div>
+          <p className="eyebrow">Welcome to your workspace</p>
+          <h1>
+            {mode === "login" ? "Back in the game." : "Make it your season."}
+          </h1>
+          <p className="auth-description">
+            {mode === "login"
+              ? "Sign in to pick up where you left off. Your league and your next decision are waiting."
+              : "Create an account, connect your league, and put your next move in perspective."}
           </p>
+          {GOOGLE_CLIENT_ID && (
+            <>
+              <div className="mt-7 flex justify-center">
+                <div ref={googleBtnRef} />
+              </div>
+              <div className="auth-divider">or use your email</div>
+            </>
+          )}
+          <form onSubmit={submit} className="mt-7 space-y-5">
+            <div>
+              <label htmlFor="email" className="field-label">
+                Email address
+              </label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                required
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="form-input"
+              />
+            </div>
+            <div>
+              <label htmlFor="password" className="field-label">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                autoComplete={
+                  mode === "login" ? "current-password" : "new-password"
+                }
+                required
+                minLength={mode === "register" ? 8 : undefined}
+                placeholder={
+                  mode === "login"
+                    ? "Enter your password"
+                    : "At least 8 characters"
+                }
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="form-input"
+              />
+            </div>
+            {error && (
+              <p
+                role="alert"
+                className="text-sm text-red-600 dark:text-red-400"
+              >
+                {error}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={busy}
+              className="button-primary w-full"
+            >
+              {busy
+                ? "Connecting…"
+                : mode === "login"
+                  ? "Sign in"
+                  : "Create account"}
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </form>
+          <p className="mt-6 text-center text-xs text-gray-500">
+            {mode === "login" ? "New to FFAI? " : "Already have an account? "}
+            <button
+              disabled={busy}
+              onClick={() => {
+                setMode(mode === "login" ? "register" : "login");
+                setError(null);
+              }}
+              className="font-semibold text-green-700 hover:underline"
+            >
+              {mode === "login" ? "Create an account" : "Sign in"}
+            </button>
+          </p>
+          <div className="auth-divider">take a look around</div>
+          <button
+            onClick={() => post("/api/auth/demo")}
+            disabled={busy}
+            className="button-secondary w-full"
+          >
+            <Sparkles className="h-4 w-4 text-green-700" />
+            Explore the demo
+          </button>
+          <p className="mt-3 text-center text-xs leading-5 text-gray-500">
+            A sample league, ready to explore. No signup needed.
+          </p>
+          <Link
+            href="/"
+            className="mt-9 block text-center text-xs text-gray-500 hover:text-green-700"
+          >
+            ← Back to FFAI
+          </Link>
         </div>
       </div>
     </main>
-  );
-}
-
-/* Google's multicolor "G", used only for the not-configured placeholder. */
-function GoogleGlyph() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
-      <path
-        fill="#EA4335"
-        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-      />
-      <path
-        fill="#4285F4"
-        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-      />
-      <path
-        fill="#34A853"
-        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-      />
-    </svg>
   );
 }

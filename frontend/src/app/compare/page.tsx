@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import Navbar from "@/components/Navbar";
+import PageHeader from "@/components/PageHeader";
 import { api } from "@/lib/api";
 import type { PlayerCard, WeeklyStat } from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
@@ -31,9 +32,8 @@ export default function ComparePage() {
   const [players, setPlayers] = useState<PlayerCard[]>([]);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<PlayerCard[]>([]);
-  const [metric, setMetric] = useState<(typeof METRICS)[number]["key"]>(
-    "fantasy_points_ppr"
-  );
+  const [metric, setMetric] =
+    useState<(typeof METRICS)[number]["key"]>("fantasy_points_ppr");
   const [range, setRange] = useState<"season" | "last10" | "last5">("season");
 
   async function search(value: string) {
@@ -43,14 +43,24 @@ export default function ComparePage() {
       return;
     }
     try {
-      const found = await api<{ id: string; full_name: string; position: string | null; team: string | null }[]>(
-        `/api/players/search?q=${encodeURIComponent(value)}`
-      );
+      const found = await api<
+        {
+          id: string;
+          full_name: string;
+          position: string | null;
+          team: string | null;
+        }[]
+      >(`/api/players/search?q=${encodeURIComponent(value)}`);
       setResults(
         found
           .filter((p) => !players.some((x) => x.id === p.id))
           .slice(0, 6)
-          .map((p) => ({ id: p.id, name: p.full_name, position: p.position, team: p.team }))
+          .map((p) => ({
+            id: p.id,
+            name: p.full_name,
+            position: p.position,
+            team: p.team,
+          })),
       );
     } catch {
       setResults([]);
@@ -85,12 +95,15 @@ export default function ComparePage() {
       // Zero-pad the week so string sorting matches chronological order
       const key = `${s.season}W${String(s.week).padStart(2, "0")}`;
       merged[key] ??= { label: `W${s.week}` };
-      const v = Number((s as unknown as Record<string, number | null>)[metric] ?? 0);
+      const v = Number(
+        (s as unknown as Record<string, number | null>)[metric] ?? 0,
+      );
       merged[key][players[idx].name] = v;
       values.push(v);
     }
     averages[idx] = values.length
-      ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10
+      ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) /
+        10
       : null;
   });
   // Full-season view: show every week 1-18 so byes and missed games appear
@@ -109,11 +122,16 @@ export default function ComparePage() {
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-4xl px-4 py-8">
-        <h1 className="text-2xl font-bold">Compare players</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Overlay up to 3 players to see who&apos;s trending up.
-        </p>
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-4xl px-4 py-8"
+      >
+        <PageHeader
+          title="Compare players"
+          description="Put recent production side by side. Find the differences that matter for your next decision."
+          eyebrow="See the whole picture"
+        />
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {players.map((p, i) => (
@@ -165,7 +183,8 @@ export default function ComparePage() {
                       >
                         {p.position}
                       </span>
-                      {p.name} <span className="text-xs text-gray-400">{p.team}</span>
+                      {p.name}{" "}
+                      <span className="text-xs text-gray-400">{p.team}</span>
                     </button>
                   ))}
                 </div>
@@ -218,7 +237,7 @@ export default function ComparePage() {
                   <span key={p.id} style={{ color: COLORS[i] }}>
                     {p.name.split(" ").slice(-1)[0]} avg: {averages[i]}
                   </span>
-                ) : null
+                ) : null,
               )}
             </div>
           )}
@@ -228,7 +247,10 @@ export default function ComparePage() {
             </p>
           ) : (
             <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
+              <LineChart
+                data={chartData}
+                margin={{ top: 8, right: 8, bottom: 0, left: -16 }}
+              >
                 <XAxis dataKey="label" fontSize={12} tickLine={false} />
                 <YAxis fontSize={12} tickLine={false} axisLine={false} />
                 <Tooltip />

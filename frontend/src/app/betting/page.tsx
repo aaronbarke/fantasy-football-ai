@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Navbar from "@/components/Navbar";
+import { EmptyState, LoadingState, ErrorState } from "@/components/PageState";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import { Sparkles } from "lucide-react";
@@ -64,7 +65,7 @@ export default function BettingPage() {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["betting-lines"],
     queryFn: () => api<{ games: BoardGame[] }>("/api/betting/lines"),
     staleTime: 10 * 60_000,
@@ -82,7 +83,7 @@ export default function BettingPage() {
       setAnalysis(resp.analysis);
     } catch (err) {
       setAnalysis(
-        `Something went wrong: ${err instanceof Error ? err.message : "unknown"}`
+        `Something went wrong: ${err instanceof Error ? err.message : "unknown"}`,
       );
     } finally {
       setBusy(false);
@@ -92,14 +93,20 @@ export default function BettingPage() {
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-6xl px-4 py-8">
-        <div className="flex items-center justify-between">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-6xl px-4 py-8"
+      >
+        <div className="page-heading">
           <div>
-            <h1 className="text-2xl font-bold">Betting edge</h1>
-            <p className="mt-1 text-sm text-gray-500">
-              Live lines across regulated US sportsbooks. Best price highlighted,
-              guaranteed-profit arbitrage flagged, then sorted by how much the
-              books disagree (line-shopping value).
+            <p className="eyebrow">Compare the market</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+              Sportsbook lines
+            </h1>
+            <p className="page-description">
+              Compare posted prices and see where sportsbooks disagree. Lines
+              can change between updates.
             </p>
           </div>
           <button
@@ -112,22 +119,25 @@ export default function BettingPage() {
           </button>
         </div>
 
-        {isLoading && <p className="mt-6 text-sm text-gray-400">Pulling live lines…</p>}
+        {isLoading && <LoadingState label="Loading sportsbook lines…" />}
         {error ? (
-          <p className="mt-6 text-sm text-gray-400">
-            No lines available. The books haven&apos;t posted odds yet (common in
-            the offseason), or the Odds API key is missing.
-          </p>
+          <ErrorState
+            message="Sportsbook lines are temporarily unavailable."
+            retry={() => void refetch()}
+          />
         ) : null}
         {!isLoading && !error && games.length === 0 && (
-          <p className="mt-6 text-sm text-gray-400">
-            No games with posted lines right now. Check back closer to game week.
-          </p>
+          <EmptyState
+            title="Waiting for the next slate"
+            description="No posted lines are available right now. Check back closer to game day to compare sportsbooks."
+          />
         )}
 
         {analysis && (
           <div className="prose-sm mt-6 rounded-xl border border-green-200 bg-green-50 p-6 text-sm leading-relaxed">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{analysis}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {analysis}
+            </ReactMarkdown>
           </div>
         )}
 
@@ -176,9 +186,10 @@ export default function BettingPage() {
                     Guaranteed +{g.arbitrage.profit_pct}% return:
                   </span>{" "}
                   stake {g.arbitrage.home.stake_pct}% on {g.arbitrage.home.team}{" "}
-                  ({fmtPrice(g.arbitrage.home.price)}) @ {g.arbitrage.home.book}, and{" "}
-                  {g.arbitrage.away.stake_pct}% on {g.arbitrage.away.team}{" "}
-                  ({fmtPrice(g.arbitrage.away.price)}) @ {g.arbitrage.away.book}.
+                  ({fmtPrice(g.arbitrage.home.price)}) @ {g.arbitrage.home.book}
+                  , and {g.arbitrage.away.stake_pct}% on {g.arbitrage.away.team}{" "}
+                  ({fmtPrice(g.arbitrage.away.price)}) @ {g.arbitrage.away.book}
+                  .
                 </div>
               )}
 
@@ -199,7 +210,8 @@ export default function BettingPage() {
                             </span>{" "}
                             <span className="text-xs text-gray-500">
                               @ {m.best.book}
-                              {m.shop_value > 0 && ` (+${m.shop_value} vs worst)`}
+                              {m.shop_value > 0 &&
+                                ` (+${m.shop_value} vs worst)`}
                             </span>
                           </>
                         ) : (

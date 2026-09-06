@@ -67,7 +67,9 @@ function Stat({
       <p className="mt-1 text-2xl font-extrabold tabular-nums text-gray-900 dark:text-gray-100">
         {value}
       </p>
-      {sub && <p className="mt-0.5 text-[11px] tabular-nums text-gray-400">{sub}</p>}
+      {sub && (
+        <p className="mt-0.5 text-[11px] tabular-nums text-gray-400">{sub}</p>
+      )}
     </div>
   );
 }
@@ -94,7 +96,8 @@ export default function DashboardPage() {
 
   const { data: standings } = useQuery({
     queryKey: ["standings", league?.id],
-    queryFn: () => api<StandingsEntry[]>(`/api/leagues/${league!.id}/standings`),
+    queryFn: () =>
+      api<StandingsEntry[]>(`/api/leagues/${league!.id}/standings`),
     enabled: !!league,
   });
 
@@ -102,7 +105,7 @@ export default function DashboardPage() {
     queryKey: ["rec-summary", league?.id],
     queryFn: () =>
       api<{ wins: number; losses: number; ties: number; pending: number }>(
-        `/api/recommendations/summary?connection_id=${league!.id}`
+        `/api/recommendations/summary?connection_id=${league!.id}`,
       ),
     enabled: !!league,
   });
@@ -153,15 +156,21 @@ export default function DashboardPage() {
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-6xl px-4 py-8">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-6xl px-4 py-8"
+      >
         {/* ── Header: identity + quiet controls ── */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="page-heading">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-green-600 dark:text-green-400">
-              {league ? `${league.platform} · ${league.season}` : "Loading"}
+              {league
+                ? `${league.platform} · ${league.season} season`
+                : "Your team at a glance"}
             </p>
             <h1 className="mt-1.5 text-3xl font-extrabold tracking-tight text-gray-900 dark:text-gray-100 sm:text-4xl">
-              {league?.league_name ?? "Dashboard"}
+              {league?.league_name ?? "Your overview"}
             </h1>
             {roster && (
               <p className="mt-1 text-sm text-gray-500">
@@ -179,8 +188,10 @@ export default function DashboardPage() {
                 title="Re-sync this league's rosters, standings, and matchups"
                 className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
               >
-                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-                Sync league
+                <RefreshCw
+                  className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
+                />
+                Refresh league
               </button>
               <button
                 onClick={refreshStats}
@@ -188,7 +199,9 @@ export default function DashboardPage() {
                 title="Re-pull this week's NFL stats. Refreshes values, projections, and schedule strength"
                 className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
               >
-                <Database className={`h-4 w-4 ${refreshingStats ? "animate-pulse" : ""}`} />
+                <Database
+                  className={`h-4 w-4 ${refreshingStats ? "animate-pulse" : ""}`}
+                />
                 {refreshingStats ? "Refreshing…" : "Refresh stats"}
               </button>
             </div>
@@ -227,11 +240,17 @@ export default function DashboardPage() {
               value={roster.points_for.toFixed(1)}
               sub={ppg ? `${ppg.toFixed(1)} / gm` : undefined}
             />
-            <Stat label="Points against" value={roster.points_against.toFixed(1)} />
+            <Stat
+              label="Points against"
+              value={roster.points_against.toFixed(1)}
+            />
           </div>
         ) : (
           <div className="mt-6 rounded-2xl border border-gray-200/70 bg-white px-6 py-8 text-center dark:border-gray-800/70">
-            <p className="text-sm text-gray-400">No roster yet. Try syncing your league.</p>
+            <p className="text-sm text-gray-400">
+              Your roster will appear here. Refresh your league to check for
+              players.
+            </p>
           </div>
         )}
 
@@ -279,7 +298,11 @@ export default function DashboardPage() {
                       You
                     </p>
                     <p className="mt-1 text-2xl font-extrabold tabular-nums text-gray-900 dark:text-gray-100">
-                      {formatRecord(roster?.wins ?? 0, roster?.losses ?? 0, roster?.ties ?? 0)}
+                      {formatRecord(
+                        roster?.wins ?? 0,
+                        roster?.losses ?? 0,
+                        roster?.ties ?? 0,
+                      )}
                     </p>
                     <p className="mt-0.5 text-xs tabular-nums text-gray-400">
                       {roster?.points_for.toFixed(1)} PF
@@ -296,7 +319,7 @@ export default function DashboardPage() {
                       {formatRecord(
                         matchup.opponent_team.wins,
                         matchup.opponent_team.losses,
-                        matchup.opponent_team.ties
+                        matchup.opponent_team.ties,
                       )}
                     </p>
                     <p className="mt-0.5 text-xs tabular-nums text-gray-400">
@@ -308,13 +331,15 @@ export default function DashboardPage() {
                   href="/matchup"
                   className="mt-5 flex items-center justify-center gap-1 rounded-lg bg-gray-100 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                 >
-                  Full breakdown <ChevronRight className="h-4 w-4" />
+                  See the matchup <ChevronRight className="h-4 w-4" />
                 </Link>
               </div>
             ) : (
               <div className="mt-6 flex flex-col items-center py-6 text-gray-400">
                 <Swords className="h-8 w-8 stroke-1" />
-                <p className="mt-2 text-sm">No matchup data yet.</p>
+                <p className="mt-2 text-sm">
+                  Your next matchup will appear here.
+                </p>
               </div>
             )}
           </div>
@@ -330,9 +355,9 @@ export default function DashboardPage() {
                 <Zap className="h-6 w-6" />
               </div>
               <div className="flex-1">
-                <p className="text-base font-bold">Weekly Game Plan</p>
+                <p className="text-base font-bold">Your weekly game plan</p>
                 <p className="text-sm text-green-50/90">
-                  Optimal lineup, projected score &amp; win odds.
+                  Your lineup, the close calls, and what comes next.
                 </p>
               </div>
               <ArrowRight className="h-5 w-5 shrink-0 transition-transform group-hover:translate-x-0.5" />
@@ -380,28 +405,30 @@ export default function DashboardPage() {
         </div>
 
         {/* ── AI record ── */}
-        {recSummary && recSummary.wins + recSummary.losses + recSummary.pending > 0 && (
-          <div className="mt-6 flex items-center gap-4 rounded-2xl border border-gray-200/70 bg-white px-6 py-4 dark:border-gray-800/70">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-green-100 dark:bg-green-900/40">
-              <Trophy className="h-5 w-5 text-green-700 dark:text-green-400" />
-            </div>
-            <div>
-              <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                AI start/sit record:{" "}
-                <span className="tabular-nums">
-                  {recSummary.wins}-{recSummary.losses}
-                  {recSummary.ties > 0 ? `-${recSummary.ties}` : ""}
-                </span>
-              </p>
-              {recSummary.pending > 0 && (
-                <p className="text-xs text-gray-500">
-                  {recSummary.pending} call{recSummary.pending === 1 ? "" : "s"} pending this
-                  week&apos;s results
+        {recSummary &&
+          recSummary.wins + recSummary.losses + recSummary.pending > 0 && (
+            <div className="mt-6 flex items-center gap-4 rounded-2xl border border-gray-200/70 bg-white px-6 py-4 dark:border-gray-800/70">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-green-100 dark:bg-green-900/40">
+                <Trophy className="h-5 w-5 text-green-700 dark:text-green-400" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                  AI start/sit record:{" "}
+                  <span className="tabular-nums">
+                    {recSummary.wins}-{recSummary.losses}
+                    {recSummary.ties > 0 ? `-${recSummary.ties}` : ""}
+                  </span>
                 </p>
-              )}
+                {recSummary.pending > 0 && (
+                  <p className="text-xs text-gray-500">
+                    {recSummary.pending} call
+                    {recSummary.pending === 1 ? "" : "s"} pending this
+                    week&apos;s results
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {/* ── Ask the AI ── */}
         <div className="mt-8">

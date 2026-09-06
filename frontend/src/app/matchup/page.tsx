@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
+import { EmptyState, LoadingState, ErrorState } from "@/components/PageState";
 import InjuryBadge from "@/components/InjuryBadge";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
@@ -39,11 +40,21 @@ interface MatchupPreview {
   rows?: MRow[];
 }
 
-function PlayerSide({ p, win, align }: { p: MPlayer | null; win: boolean; align: "left" | "right" }) {
+function PlayerSide({
+  p,
+  win,
+  align,
+}: {
+  p: MPlayer | null;
+  win: boolean;
+  align: "left" | "right";
+}) {
   const right = align === "right";
   if (!p) {
     return (
-      <div className={`flex flex-1 items-center gap-2 ${right ? "flex-row-reverse text-right" : ""}`}>
+      <div
+        className={`flex flex-1 items-center gap-2 ${right ? "flex-row-reverse text-right" : ""}`}
+      >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gray-100 text-[10px] text-gray-400 dark:bg-gray-800">
           —
         </div>
@@ -52,15 +63,25 @@ function PlayerSide({ p, win, align }: { p: MPlayer | null; win: boolean; align:
     );
   }
   return (
-    <div className={`flex flex-1 items-center gap-2.5 ${right ? "flex-row-reverse text-right" : ""}`}>
+    <div
+      className={`flex flex-1 items-center gap-2.5 ${right ? "flex-row-reverse text-right" : ""}`}
+    >
       <span
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white ${positionColor(p.position)}`}
       >
         {p.position}
       </span>
-      <PlayerAvatar id={p.id} name={p.name} position={p.position} team={p.team} size={36} />
+      <PlayerAvatar
+        id={p.id}
+        name={p.name}
+        position={p.position}
+        team={p.team}
+        size={36}
+      />
       <div className="min-w-0">
-        <div className={`flex items-center gap-1.5 ${right ? "flex-row-reverse" : ""}`}>
+        <div
+          className={`flex items-center gap-1.5 ${right ? "flex-row-reverse" : ""}`}
+        >
           <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
             {p.name}
           </span>
@@ -85,39 +106,57 @@ function PlayerSide({ p, win, align }: { p: MPlayer | null; win: boolean; align:
 export default function MatchupPage() {
   const { league } = useLeague();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["matchup-preview", league?.id],
-    queryFn: () => api<MatchupPreview>(`/api/leagues/${league!.id}/matchup/preview`),
+    queryFn: () =>
+      api<MatchupPreview>(`/api/leagues/${league!.id}/matchup/preview`),
     enabled: !!league,
     retry: false,
   });
 
-  const ready = data?.status === "ok" && data.user && data.opponent && data.rows;
-  const winPct = data?.win_probability != null ? Math.round(data.win_probability * 100) : null;
+  const ready =
+    data?.status === "ok" && data.user && data.opponent && data.rows;
+  const winPct =
+    data?.win_probability != null
+      ? Math.round(data.win_probability * 100)
+      : null;
   const oppName = data?.opponent?.owner_name || "Opponent";
 
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-4xl px-4 py-8">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight">
-            {data?.week ? `Week ${data.week} matchup` : "Matchup"}
-          </h1>
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-4xl px-4 py-8"
+      >
+        <div className="page-heading">
+          <div>
+            <p className="eyebrow">Head to head</p>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {data?.week ? `Week ${data.week} matchup` : "Matchup"}
+            </h1>
+            <p className="page-description">
+              Two rosters. One matchup. See how the projected lineups compare.
+            </p>
+          </div>
           <Link
             href={`/chat?q=${encodeURIComponent("Break down my matchup this week")}`}
             className="flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
           >
-            <Sparkles className="h-4 w-4" /> Ask AI to break it down
+            <Sparkles className="h-4 w-4" /> Get a matchup breakdown
           </Link>
         </div>
 
-        {isLoading && <p className="mt-6 text-sm text-gray-400">Projecting the matchup…</p>}
-        {!isLoading && !ready && (
-          <p className="mt-6 text-sm text-gray-400">
-            No matchup data yet. Projections appear once your league has rosters.
-            Try Sync on the dashboard after draft day.
-          </p>
+        {isLoading && <LoadingState label="Comparing the lineups…" />}
+        {error && <ErrorState retry={() => void refetch()} />}
+        {!isLoading && !error && !ready && (
+          <EmptyState
+            title="Meet your matchup soon"
+            description="Your comparison will appear when rosters and the league schedule are available. Refresh your league to check for updates."
+            href="/dashboard"
+            action="Go to overview"
+          />
         )}
 
         {ready && data.user && data.opponent && (
@@ -150,8 +189,12 @@ export default function MatchupPage() {
               {winPct != null && (
                 <div className="mt-5">
                   <div className="mb-1 flex justify-between text-xs font-semibold">
-                    <span className="text-green-600 dark:text-green-400">{winPct}% you</span>
-                    <span className="text-gray-400">{100 - winPct}% {oppName}</span>
+                    <span className="text-green-600 dark:text-green-400">
+                      {winPct}% you
+                    </span>
+                    <span className="text-gray-400">
+                      {100 - winPct}% {oppName}
+                    </span>
                   </div>
                   <div className="flex h-2.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
                     <div
@@ -160,7 +203,8 @@ export default function MatchupPage() {
                     />
                   </div>
                   <p className="mt-2 text-center text-xs text-gray-400">
-                    Win probability from projected scores &amp; each player&apos;s volatility
+                    Win probability from projected scores &amp; each
+                    player&apos;s volatility
                   </p>
                 </div>
               )}

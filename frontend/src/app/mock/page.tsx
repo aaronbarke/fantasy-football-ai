@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Navbar from "@/components/Navbar";
+import PageHeader from "@/components/PageHeader";
+import PlaybookField from "@/components/PlaybookField";
+import { LoadingState, ErrorState } from "@/components/PageState";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import { positionColor } from "@/lib/utils";
@@ -98,9 +101,11 @@ export default function MockDraftPage() {
   const { data: config } = useQuery({
     queryKey: ["mockConfig", league?.id],
     queryFn: () =>
-      api<{ teams: number | null; rounds: number | null; scoring: string | null }>(
-        `/api/mock/config?connection_id=${league!.id}`
-      ),
+      api<{
+        teams: number | null;
+        rounds: number | null;
+        scoring: string | null;
+      }>(`/api/mock/config?connection_id=${league!.id}`),
     enabled: !!league?.id && !draftId,
   });
 
@@ -112,7 +117,12 @@ export default function MockDraftPage() {
     }
   }, [config, prefilled]);
 
-  const { data: state, isLoading } = useQuery({
+  const {
+    data: state,
+    isLoading,
+    error: loadError,
+    refetch,
+  } = useQuery({
     queryKey: ["mock", draftId],
     queryFn: () => api<MockState>(`/api/mock/${draftId}`),
     enabled: !!draftId,
@@ -140,7 +150,9 @@ export default function MockDraftPage() {
       localStorage.setItem(ACTIVE_KEY, created.id);
       setDraftId(created.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start the draft");
+      setError(
+        err instanceof Error ? err.message : "Could not start the draft",
+      );
     } finally {
       setBusy(false);
     }
@@ -156,9 +168,13 @@ export default function MockDraftPage() {
         body: JSON.stringify({ player_id: playerId }),
       });
       await queryClient.invalidateQueries({ queryKey: ["mock", draftId] });
-      await queryClient.invalidateQueries({ queryKey: ["mockResults", draftId] });
+      await queryClient.invalidateQueries({
+        queryKey: ["mockResults", draftId],
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "That pick didn't go through");
+      setError(
+        err instanceof Error ? err.message : "That pick didn't go through",
+      );
     } finally {
       setBusy(false);
     }
@@ -171,7 +187,7 @@ export default function MockDraftPage() {
   }
 
   const available = (state?.available ?? []).filter(
-    (p) => filter === "ALL" || p.position === filter
+    (p) => filter === "ALL" || p.position === filter,
   );
   const myRoster = (state?.picks ?? []).filter((p) => p.is_user);
   const recentPicks = [...(state?.picks ?? [])].reverse().slice(0, 8);
@@ -180,7 +196,9 @@ export default function MockDraftPage() {
   // as "here's what came off the board", not an unexplained skip.
   const sinceYourLastPick = (() => {
     const picks = state?.picks ?? [];
-    const myPickNumbers = picks.filter((p) => p.is_user).map((p) => p.overall_pick);
+    const myPickNumbers = picks
+      .filter((p) => p.is_user)
+      .map((p) => p.overall_pick);
     const lastMine = myPickNumbers.length
       ? myPickNumbers[myPickNumbers.length - 1]
       : 0;
@@ -192,70 +210,91 @@ export default function MockDraftPage() {
     return (
       <>
         <Navbar />
-        <main className="mx-auto max-w-6xl px-4 py-8">
-          <h1 className="text-2xl font-bold">Mock draft</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Practice against bots that draft near real consensus ADP, scattered
-            by how much actual drafters disagree about each player.
-          </p>
-          <div className="mt-6 max-w-md rounded-xl border border-gray-200 bg-white p-5">
-            <div className="space-y-4">
-              <label className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">Teams</span>
-                <select
-                  value={teams}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    setTeams(n);
-                    if (slot > n) setSlot(n);
-                  }}
-                  className="rounded-md border border-gray-300 bg-white px-2 py-1"
-                >
-                  {[8, 10, 12, 14, 16].map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">Rounds</span>
-                <select
-                  value={rounds}
-                  onChange={(e) => setRounds(Number(e.target.value))}
-                  className="rounded-md border border-gray-300 bg-white px-2 py-1"
-                >
-                  {[10, 12, 13, 14, 15, 16, 17, 18, 20].map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">Your draft slot</span>
-                <select
-                  value={slot}
-                  onChange={(e) => setSlot(Number(e.target.value))}
-                  className="rounded-md border border-gray-300 bg-white px-2 py-1"
-                >
-                  {Array.from({ length: teams }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="mx-auto max-w-6xl px-4 py-8"
+        >
+          <PageHeader
+            title="Practice your next great draft."
+            description="Try a strategy, make your picks, and see how your roster stacks up against simulated opponents."
+            eyebrow="The practice field"
+          />
+          <div className="mock-setup">
+            <div className="rounded-2xl border border-gray-200 bg-white p-7">
+              <h2 className="mb-6 text-lg font-semibold">Set up your draft</h2>
+              <div className="space-y-4">
+                <label className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Teams</span>
+                  <select
+                    value={teams}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      setTeams(n);
+                      if (slot > n) setSlot(n);
+                    }}
+                    className="rounded-md border border-gray-300 bg-white px-2 py-1"
+                  >
+                    {[8, 10, 12, 14, 16].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Rounds</span>
+                  <select
+                    value={rounds}
+                    onChange={(e) => setRounds(Number(e.target.value))}
+                    className="rounded-md border border-gray-300 bg-white px-2 py-1"
+                  >
+                    {[10, 12, 13, 14, 15, 16, 17, 18, 20].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Your draft slot</span>
+                  <select
+                    value={slot}
+                    onChange={(e) => setSlot(Number(e.target.value))}
+                    className="rounded-md border border-gray-300 bg-white px-2 py-1"
+                  >
+                    {Array.from({ length: teams }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <button
+                onClick={startDraft}
+                disabled={busy}
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+              >
+                <Play className="h-4 w-4" />
+                {busy ? "Setting up…" : "Start mock draft"}
+              </button>
+              {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
             </div>
-            <button
-              onClick={startDraft}
-              disabled={busy}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
-            >
-              <Play className="h-4 w-4" />
-              {busy ? "Setting up…" : "Start mock draft"}
-            </button>
-            {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
+            <aside className="mock-story">
+              <p className="eyebrow">Room to experiment</p>
+              <h2>
+                Find your rhythm.
+                <br />
+                Before it counts.
+              </h2>
+              <PlaybookField />
+              <p>
+                Set your league size and draft position. Simulated opponents
+                pick around market rankings, so every round gives you a decision
+                to make.
+              </p>
+            </aside>
           </div>
         </main>
       </>
@@ -265,7 +304,11 @@ export default function MockDraftPage() {
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-6xl px-4 py-8">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-6xl px-4 py-8"
+      >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Mock draft</h1>
@@ -284,7 +327,13 @@ export default function MockDraftPage() {
           </button>
         </div>
 
-        {isLoading && <p className="mt-6 text-sm text-gray-400">Loading…</p>}
+        {isLoading && <LoadingState label="Opening your draft…" />}
+        {loadError && (
+          <ErrorState
+            message="This draft couldn’t load. Try again, or start a new practice draft."
+            retry={() => void refetch()}
+          />
+        )}
         {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
         {state && (
@@ -307,8 +356,8 @@ export default function MockDraftPage() {
                   </span>
                 ) : state.is_my_turn ? (
                   <span className="flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1 text-sm font-semibold text-white">
-                    <Zap className="h-4 w-4" /> You&apos;re on the clock · pick #
-                    {state.on_the_clock}
+                    <Zap className="h-4 w-4" /> You&apos;re on the clock · pick
+                    #{state.on_the_clock}
                   </span>
                 ) : (
                   <span className="rounded-lg bg-gray-100 px-3 py-1 text-sm text-gray-600">
@@ -364,7 +413,8 @@ export default function MockDraftPage() {
                       </p>
                       <p className="font-semibold">{results.best_pick.name}</p>
                       <p className="text-xs text-gray-500">
-                        {results.best_pick.position} · {results.best_pick.vor} VOR
+                        {results.best_pick.position} · {results.best_pick.vor}{" "}
+                        VOR
                         {results.best_pick.adp_delta != null
                           ? ` · went ${results.best_pick.adp_delta} picks late`
                           : ""}
@@ -378,7 +428,8 @@ export default function MockDraftPage() {
                       </p>
                       <p className="font-semibold">{results.worst_pick.name}</p>
                       <p className="text-xs text-gray-500">
-                        {results.worst_pick.position} · {results.worst_pick.vor} VOR
+                        {results.worst_pick.position} · {results.worst_pick.vor}{" "}
+                        VOR
                       </p>
                     </div>
                   )}
@@ -451,44 +502,47 @@ export default function MockDraftPage() {
 
               {/* Side panels */}
               <div className="space-y-4">
-                {state.is_my_turn && (state.recommendations ?? []).length > 0 && (
-                  <div className="rounded-xl border border-gray-200 bg-white p-5">
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-                      Suggested
-                    </h2>
-                    <ul className="mt-3 space-y-3">
-                      {(state.recommendations ?? []).map((r, i) => (
-                        <li key={r.player_id} className="text-sm">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-400">{i + 1}</span>
-                            <span
-                              className={`flex h-5 w-5 items-center justify-center rounded text-[9px] font-bold text-white ${positionColor(r.position)}`}
-                            >
-                              {r.position}
-                            </span>
-                            <span className="flex-1 truncate font-semibold">
-                              {r.name}
-                            </span>
-                            <button
-                              onClick={() => pick(r.player_id)}
-                              disabled={busy}
-                              className="rounded-md bg-green-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-green-700 disabled:opacity-40"
-                            >
-                              Draft
-                            </button>
-                          </div>
-                          <ul className="mt-1 space-y-0.5 pl-7">
-                            {r.reasons.slice(0, 3).map((why) => (
-                              <li key={why} className="text-xs text-gray-500">
-                                · {why}
-                              </li>
-                            ))}
-                          </ul>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                {state.is_my_turn &&
+                  (state.recommendations ?? []).length > 0 && (
+                    <div className="rounded-xl border border-gray-200 bg-white p-5">
+                      <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                        Suggested
+                      </h2>
+                      <ul className="mt-3 space-y-3">
+                        {(state.recommendations ?? []).map((r, i) => (
+                          <li key={r.player_id} className="text-sm">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-400">
+                                {i + 1}
+                              </span>
+                              <span
+                                className={`flex h-5 w-5 items-center justify-center rounded text-[9px] font-bold text-white ${positionColor(r.position)}`}
+                              >
+                                {r.position}
+                              </span>
+                              <span className="flex-1 truncate font-semibold">
+                                {r.name}
+                              </span>
+                              <button
+                                onClick={() => pick(r.player_id)}
+                                disabled={busy}
+                                className="rounded-md bg-green-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-green-700 disabled:opacity-40"
+                              >
+                                Draft
+                              </button>
+                            </div>
+                            <ul className="mt-1 space-y-0.5 pl-7">
+                              {r.reasons.slice(0, 3).map((why) => (
+                                <li key={why} className="text-xs text-gray-500">
+                                  · {why}
+                                </li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                 <div className="rounded-xl border border-gray-200 bg-white p-5">
                   <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
@@ -505,7 +559,7 @@ export default function MockDraftPage() {
                         <span className="w-8 text-xs text-gray-400">
                           {p.round}.
                           {String(
-                            ((p.overall_pick - 1) % state.teams) + 1
+                            ((p.overall_pick - 1) % state.teams) + 1,
                           ).padStart(2, "0")}
                         </span>
                         <span
@@ -546,7 +600,9 @@ export default function MockDraftPage() {
                       </li>
                     ))}
                     {recentPicks.length === 0 && (
-                      <p className="text-sm text-gray-400">Draft hasn&apos;t started.</p>
+                      <p className="text-sm text-gray-400">
+                        Draft hasn&apos;t started.
+                      </p>
                     )}
                   </ul>
                 </div>

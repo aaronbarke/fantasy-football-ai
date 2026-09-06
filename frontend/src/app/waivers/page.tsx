@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
+import { EmptyState, LoadingState, ErrorState } from "@/components/PageState";
 import InjuryBadge from "@/components/InjuryBadge";
 import { api } from "@/lib/api";
 import type { WaiverPlayer } from "@/lib/types";
@@ -18,32 +19,47 @@ export default function WaiversPage() {
   const { league } = useLeague();
   const [filter, setFilter] = useState("ALL");
 
-  const { data: waivers, isLoading } = useQuery({
+  const {
+    data: waivers,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ["waivers", league?.id],
     queryFn: () => api<WaiverPlayer[]>(`/api/leagues/${league!.id}/waivers`),
     enabled: !!league,
   });
 
   const filtered =
-    waivers?.filter(
-      (w) => filter === "ALL" || w.player.position === filter
-    ) ?? [];
+    waivers?.filter((w) => filter === "ALL" || w.player.position === filter) ??
+    [];
 
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-4xl px-4 py-8">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Waiver wire</h1>
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-4xl px-4 py-8"
+      >
+        <div className="page-heading">
+          <div>
+            <p className="eyebrow">Find your next addition</p>
+            <h1>Waiver wire</h1>
+            <p className="page-description">
+              Available players in your league. Explore your options before
+              making a move.
+            </p>
+          </div>
           <Link
             href={`/chat?q=${encodeURIComponent("Who should I pick up off waivers, and who should I drop?")}`}
             className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
           >
-            Ask AI for pickups
+            Find a pickup
           </Link>
         </div>
 
-        <div className="mt-4 flex gap-1.5">
+        <div className="mt-6 flex flex-wrap gap-1.5">
           {positions.map((p) => (
             <button
               key={p}
@@ -59,11 +75,23 @@ export default function WaiversPage() {
           ))}
         </div>
 
-        {isLoading && <p className="mt-6 text-sm text-gray-400">Loading…</p>}
-        {!isLoading && filtered.length === 0 && (
-          <p className="mt-6 text-sm text-gray-400">
-            No available players found. Sync your league from the dashboard.
-          </p>
+        {isLoading && <LoadingState label="Finding available players…" />}
+        {error && <ErrorState retry={() => void refetch()} />}
+        {!isLoading && !error && filtered.length === 0 && (
+          <EmptyState
+            title={
+              filter === "ALL"
+                ? "No available players yet"
+                : `No ${filter} players in this list`
+            }
+            description={
+              filter === "ALL"
+                ? "Refresh your league from Overview to bring in available players."
+                : "Try another position or view all players to keep exploring."
+            }
+            href={filter === "ALL" ? "/dashboard" : undefined}
+            action="Go to overview"
+          />
         )}
 
         <ul className="mt-6 space-y-2">
@@ -87,7 +115,9 @@ export default function WaiversPage() {
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">{w.player.name}</p>
+                <p className="truncate text-sm font-semibold">
+                  {w.player.name}
+                </p>
                 <p className="text-xs text-gray-500">{w.player.team ?? "FA"}</p>
               </div>
               {w.recent_ppr_avg != null && (
@@ -99,7 +129,7 @@ export default function WaiversPage() {
                 <span className="flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700 dark:bg-orange-500/15 dark:text-orange-300">
                   <Flame className="h-3 w-3" />
                   {Intl.NumberFormat("en", { notation: "compact" }).format(
-                    w.trending_count
+                    w.trending_count,
                   )}{" "}
                   adds
                 </span>

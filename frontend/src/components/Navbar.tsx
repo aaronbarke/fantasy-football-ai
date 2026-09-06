@@ -1,75 +1,137 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api, clearTokens, getSelectedLeague, getToken, setSelectedLeague } from "@/lib/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  api,
+  clearTokens,
+  getSelectedLeague,
+  getToken,
+  setSelectedLeague,
+} from "@/lib/api";
 import type { LeagueConnection } from "@/lib/types";
-import { ChevronDown, LogOut, Menu, Moon, Plus, Sun, Wrench, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  ArrowUpRight,
+  CalendarDays,
+  BarChart3,
+  ChevronDown,
+  ClipboardList,
+  Columns2,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  MessageSquare,
+  Moon,
+  Plus,
+  Radio,
+  Sun,
+  Swords,
+  Trophy,
+  Users,
+  X,
+} from "lucide-react";
+import Brand from "./Brand";
 
-const links = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/gameplan", label: "Game plan" },
-  { href: "/chat", label: "Chat" },
-  { href: "/roster", label: "Roster" },
-  { href: "/matchup", label: "Matchup" },
-  { href: "/waivers", label: "Waivers" },
-];
-
-const tools = [
-  { href: "/trade", label: "Trade analyzer" },
-  { href: "/schedule", label: "Schedule strength" },
-  { href: "/compare", label: "Compare players" },
-  { href: "/draft", label: "Draft room" },
-  { href: "/mock", label: "Mock draft" },
-  { href: "/betting", label: "Betting edge" },
+const groups = [
+  {
+    label: "Your team",
+    links: [
+      { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+      { href: "/gameplan", label: "Game plan", icon: ClipboardList },
+      { href: "/roster", label: "Roster", icon: Users },
+      { href: "/matchup", label: "Matchup", icon: Swords },
+      { href: "/waivers", label: "Waiver wire", icon: Plus },
+    ],
+  },
+  {
+    label: "Make your move",
+    links: [
+      { href: "/chat", label: "Ask your assistant", icon: MessageSquare },
+      { href: "/trade", label: "Trade analyzer", icon: ArrowLeftRight },
+      { href: "/compare", label: "Compare players", icon: Columns2 },
+      { href: "/schedule", label: "Schedule strength", icon: CalendarDays },
+    ],
+  },
+  {
+    label: "Draft & research",
+    links: [
+      { href: "/draft", label: "Draft room", icon: Radio },
+      { href: "/mock", label: "Mock draft", icon: Trophy },
+      { href: "/betting", label: "Sportsbook lines", icon: BarChart3 },
+    ],
+  },
 ];
 
 export default function Navbar() {
   const pathname = usePathname();
-  const router = useRouter();
-  const [toolsOpen, setToolsOpen] = useState(false);
-  const [leagueOpen, setLeagueOpen] = useState(false);
+  const queryClient = useQueryClient();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [leagueOpen, setLeagueOpen] = useState(false);
   const [dark, setDark] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const selectorRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setSelectedId(getSelectedLeague());
     setDark(document.documentElement.classList.contains("dark"));
-    const close = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setToolsOpen(false);
+    const close = (event: MouseEvent) => {
+      if (!selectorRef.current?.contains(event.target as Node))
         setLeagueOpen(false);
-      }
     };
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, []);
 
-  // Close any open menus when the route changes
   useEffect(() => {
     setMobileOpen(false);
-    setToolsOpen(false);
     setLeagueOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    drawerRef.current?.querySelector<HTMLElement>("a,button")?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+      if (event.key === "Tab") {
+        const items = drawerRef.current?.querySelectorAll<HTMLElement>(
+          "a[href], button:not([disabled])",
+        );
+        if (!items?.length) return;
+        const first = items[0],
+          last = items[items.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKey);
+      menuButtonRef.current?.focus();
+    };
+  }, [mobileOpen]);
 
   const { data: leagues } = useQuery({
     queryKey: ["leagues"],
     queryFn: () => api<LeagueConnection[]>("/api/leagues"),
     enabled: typeof window !== "undefined" && !!getToken(),
   });
-
   const active = leagues?.find((l) => l.id === selectedId) ?? leagues?.[0];
-
-  function pickLeague(id: string) {
-    setSelectedLeague(id);
-    setSelectedId(id);
-    setLeagueOpen(false);
-    window.location.reload();
-  }
+  const current = groups
+    .flatMap((g) => g.links)
+    .find((l) => l.href === pathname);
 
   function toggleTheme() {
     const next = !dark;
@@ -78,174 +140,183 @@ export default function Navbar() {
     localStorage.setItem("theme", next ? "dark" : "light");
   }
 
-  const toolActive = tools.some((t) => t.href === pathname);
-
   return (
-    <nav className="sticky top-0 z-40 border-b border-gray-200/70 bg-white/85 backdrop-blur-md dark:border-gray-800/70 dark:bg-gray-950/80">
-      <div ref={wrapRef} className="mx-auto max-w-6xl px-4">
-       <div className="flex items-center justify-between py-3">
-        <div className="flex items-center gap-4">
-          <Link href="/dashboard" className="text-lg font-bold text-green-700 dark:text-green-400">
-            FF<span className="text-gray-900 dark:text-gray-100">AI</span>
+    <header className="app-navigation">
+      <a href="#main-content" className="skip-link">
+        Skip to content
+      </a>
+      {mobileOpen && (
+        <div
+          className="nav-backdrop"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        ref={drawerRef}
+        className={`app-sidebar ${mobileOpen ? "is-open" : ""}`}
+        id="app-sidebar"
+        aria-label="Workspace navigation"
+        role={mobileOpen ? "dialog" : undefined}
+        aria-modal={mobileOpen || undefined}
+      >
+        <div className="flex items-center justify-between">
+          <Brand />
+          <button
+            onClick={() => setMobileOpen(false)}
+            className="icon-button lg:hidden"
+            aria-label="Close navigation"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <nav className="sidebar-links" aria-label="Main navigation">
+          {groups.map((group) => (
+            <div key={group.label} className="nav-group">
+              <p>{group.label}</p>
+              {group.links.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={`sidebar-link ${pathname === link.href ? "is-active" : ""}`}
+                  aria-current={pathname === link.href ? "page" : undefined}
+                >
+                  <link.icon
+                    className="h-[18px] w-[18px]"
+                    strokeWidth={1.7}
+                    aria-hidden="true"
+                  />
+                  <span>{link.label}</span>
+                  {pathname === link.href && <span className="active-dot" />}
+                </Link>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div className="sidebar-footer">
+          <Link href="/connect" className="sidebar-add">
+            <Plus className="h-4 w-4" />
+            Connect a league
+            <ArrowUpRight className="ml-auto h-4 w-4" />
           </Link>
-
-          {/* League switcher — or, when the account has no leagues yet, a
-              direct way to connect one (otherwise a zero-league account has no
-              entry point to /connect at all). */}
-          {leagues && leagues.length === 0 && (
-            <Link
-              href="/connect"
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-green-700 hover:bg-gray-50 dark:border-gray-700 dark:text-green-400 dark:hover:bg-gray-800"
+          <div className="flex items-center justify-between pt-3">
+            <span className="text-[11px] text-gray-500">
+              Built for your next move.
+            </span>
+            <button
+              className="icon-button"
+              aria-label="Sign out"
+              title="Sign out"
+              onClick={() => {
+                clearTokens();
+                queryClient.clear();
+                window.location.href = "/login";
+              }}
             >
-              <Plus className="h-3.5 w-3.5" /> Add league
-            </Link>
-          )}
-          {leagues && leagues.length > 0 && (
-            <div className="relative">
-              <button
-                onClick={() => {
-                  setLeagueOpen(!leagueOpen);
-                  setToolsOpen(false);
-                }}
-                className="flex max-w-[180px] items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-              >
-                <span className="truncate">{active?.league_name ?? "Select league"}</span>
-                <span className="rounded bg-gray-100 px-1 py-0.5 text-[10px] uppercase text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                  {active?.platform}
-                </span>
-                <ChevronDown className="h-3 w-3 shrink-0" />
-              </button>
-              {leagueOpen && (
-                <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                  {leagues.map((l) => (
-                    <button
-                      key={l.id}
-                      onClick={() => pickLeague(l.id)}
-                      className={`block w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 ${
-                        l.id === active?.id ? "bg-green-50 dark:bg-green-950" : ""
-                      }`}
-                    >
-                      <p className="truncate font-medium text-gray-900 dark:text-gray-100">
-                        {l.league_name ?? l.league_id}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {l.platform} · {l.season} ·{" "}
-                        {l.scoring_type?.replace("_", "-").toUpperCase()}
-                      </p>
-                    </button>
-                  ))}
-                  <Link
-                    href="/connect"
-                    className="flex items-center gap-1.5 border-t border-gray-100 px-3 py-2 text-sm font-medium text-green-700 hover:bg-gray-50 dark:border-gray-800 dark:text-green-400 dark:hover:bg-gray-800"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add league
-                  </Link>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="hidden gap-1 md:flex">
-            {links.map((l) => (
-              <Link
-                key={l.href}
-                href={l.href}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-                  pathname === l.href
-                    ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300"
-                    : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
-                }`}
-              >
-                {l.label}
-              </Link>
-            ))}
-
-            {/* Tools dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => {
-                  setToolsOpen(!toolsOpen);
-                  setLeagueOpen(false);
-                }}
-                className={`flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium ${
-                  toolActive
-                    ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300"
-                    : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
-                }`}
-              >
-                <Wrench className="h-3.5 w-3.5" /> Tools <ChevronDown className="h-3 w-3" />
-              </button>
-              {toolsOpen && (
-                <div className="absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                  {tools.map((t) => (
-                    <Link
-                      key={t.href}
-                      href={t.href}
-                      onClick={() => setToolsOpen(false)}
-                      className={`block px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 ${
-                        pathname === t.href
-                          ? "font-semibold text-green-700 dark:text-green-400"
-                          : "text-gray-700 dark:text-gray-200"
-                      }`}
-                    >
-                      {t.label}
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </div>
-
-        <div className="flex items-center gap-1">
+      </aside>
+      <div className="workspace-bar">
+        <div className="flex min-w-0 items-center gap-3">
           <button
-            onClick={toggleTheme}
-            aria-label="Toggle dark mode"
-            className="rounded-md p-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+            ref={menuButtonRef}
+            className="icon-button lg:hidden"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Open navigation"
+            aria-controls="app-sidebar"
+            aria-expanded={mobileOpen}
           >
-            {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            <Menu className="h-5 w-5" />
           </button>
-          <button
-            onClick={() => {
-              if (!window.confirm("Sign out of FFAI?")) return;
-              clearTokens();
-              router.push("/login");
+          <span className="hidden text-xs text-gray-400 sm:inline">
+            Workspace
+          </span>
+          <span className="hidden text-gray-300 sm:inline">/</span>
+          <span className="truncate text-sm font-medium">
+            {current?.label ?? "Your league"}
+          </span>
+        </div>
+        <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+          <div
+            ref={selectorRef}
+            className="league-selector"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setLeagueOpen(false);
             }}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
           >
-            <LogOut className="h-4 w-4" />
-            <span className="hidden sm:inline">Sign out</span>
-          </button>
+            {active ? (
+              <>
+                <button
+                  className="league-trigger"
+                  aria-expanded={leagueOpen}
+                  aria-controls="league-options"
+                  onClick={() => setLeagueOpen(!leagueOpen)}
+                >
+                  <span className="league-avatar">
+                    {active.league_name?.slice(0, 1) ?? "L"}
+                  </span>
+                  <span className="truncate">
+                    {active.league_name ?? "Your league"}
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                </button>
+                {leagueOpen && (
+                  <div id="league-options" className="league-options">
+                    <p className="eyebrow px-3 py-2">Switch league</p>
+                    {leagues?.map((l) => (
+                      <button
+                        key={l.id}
+                        className="league-option"
+                        aria-pressed={l.id === active.id}
+                        onClick={() => {
+                          setSelectedLeague(l.id);
+                          window.location.reload();
+                        }}
+                      >
+                        <span className="block truncate font-semibold">
+                          {l.league_name ?? l.league_id}
+                        </span>
+                        <span className="mt-1 block text-xs text-gray-500">
+                          {l.platform.toUpperCase()} · {l.season} ·{" "}
+                          {l.scoring_type?.replace("_", "-").toUpperCase()}
+                        </span>
+                      </button>
+                    ))}
+                    <Link
+                      href="/connect"
+                      className="league-option flex items-center gap-2 text-green-700"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Connect another league
+                    </Link>
+                  </div>
+                )}
+              </>
+            ) : (
+              <Link
+                href="/connect"
+                className="text-xs font-semibold text-green-700"
+              >
+                Connect league
+              </Link>
+            )}
+          </div>
           <button
-            onClick={() => setMobileOpen((o) => !o)}
-            aria-label="Menu"
-            className="rounded-md p-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 md:hidden"
+            className="icon-button"
+            onClick={toggleTheme}
+            aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+            title={dark ? "Light mode" : "Dark mode"}
           >
-            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            {dark ? (
+              <Sun className="h-[18px] w-[18px]" />
+            ) : (
+              <Moon className="h-[18px] w-[18px]" />
+            )}
           </button>
         </div>
-       </div>
-
-       {/* Mobile menu */}
-       {mobileOpen && (
-         <div className="border-t border-gray-200/70 py-2 dark:border-gray-800/70 md:hidden">
-           {[...links, ...tools].map((l) => (
-             <Link
-               key={l.href}
-               href={l.href}
-               onClick={() => setMobileOpen(false)}
-               className={`block rounded-md px-3 py-2 text-sm font-medium ${
-                 pathname === l.href
-                   ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300"
-                   : "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
-               }`}
-             >
-               {l.label}
-             </Link>
-           ))}
-         </div>
-       )}
       </div>
-    </nav>
+    </header>
   );
 }

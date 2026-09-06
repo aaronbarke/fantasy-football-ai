@@ -2,11 +2,18 @@
 
 import { useState } from "react";
 import Navbar from "@/components/Navbar";
+import PageHeader from "@/components/PageHeader";
 import { api } from "@/lib/api";
 import type { PlayerCard } from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
 import { positionColor } from "@/lib/utils";
-import { ArrowLeftRight, Search, TrendingDown, TrendingUp, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Search,
+  TrendingDown,
+  TrendingUp,
+  X,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -27,14 +34,24 @@ function PlayerSearchAdd({
       return;
     }
     try {
-      const found = await api<{ id: string; full_name: string; position: string | null; team: string | null }[]>(
-        `/api/players/search?q=${encodeURIComponent(value)}`
-      );
+      const found = await api<
+        {
+          id: string;
+          full_name: string;
+          position: string | null;
+          team: string | null;
+        }[]
+      >(`/api/players/search?q=${encodeURIComponent(value)}`);
       setResults(
         found
           .filter((p) => !exclude.includes(p.id))
           .slice(0, 6)
-          .map((p) => ({ id: p.id, name: p.full_name, position: p.position, team: p.team }))
+          .map((p) => ({
+            id: p.id,
+            name: p.full_name,
+            position: p.position,
+            team: p.team,
+          })),
       );
     } catch {
       setResults([]);
@@ -91,7 +108,9 @@ function TradeSide({
 }) {
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-5">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{title}</h2>
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+        {title}
+      </h2>
       <div className="mt-3 space-y-2">
         {players.map((p) => (
           <div
@@ -137,9 +156,19 @@ interface TradePlayerValue {
 
 function TrendArrow({ trend }: { trend?: string | null }) {
   if (trend === "rising")
-    return <TrendingUp className="inline h-3 w-3 text-green-500" aria-label="rising" />;
+    return (
+      <TrendingUp
+        className="inline h-3 w-3 text-green-500"
+        aria-label="rising"
+      />
+    );
   if (trend === "falling")
-    return <TrendingDown className="inline h-3 w-3 text-red-500" aria-label="falling" />;
+    return (
+      <TrendingDown
+        className="inline h-3 w-3 text-red-500"
+        aria-label="falling"
+      />
+    );
   return null;
 }
 
@@ -187,15 +216,24 @@ export default function TradePage() {
   return (
     <>
       <Navbar />
-      <main className="mx-auto max-w-5xl px-4 py-8">
-        <h1 className="text-2xl font-bold">Trade analyzer</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Build both sides of a trade and get a graded AI verdict. Each player
-          gets a value score from Value Over Replacement, updated as the season plays out.
-        </p>
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-5xl px-4 py-8"
+      >
+        <PageHeader
+          title="Trade analyzer"
+          description="Weigh what you give, what you get, and how the deal fits your roster."
+          eyebrow="Make your move"
+        />
 
         <div className="mt-6 grid gap-6 md:grid-cols-2">
-          <TradeSide title="You give" players={give} setPlayers={setGive} excludeIds={allIds} />
+          <TradeSide
+            title="You give"
+            players={give}
+            setPlayers={setGive}
+            excludeIds={allIds}
+          />
           <TradeSide
             title="You receive"
             players={receive}
@@ -215,7 +253,9 @@ export default function TradePage() {
           </button>
         </div>
 
-        {error && <p className="mt-4 text-center text-sm text-red-600">{error}</p>}
+        {error && (
+          <p className="mt-4 text-center text-sm text-red-600">{error}</p>
+        )}
 
         {result && (
           <div className="mt-8 space-y-4">
@@ -223,7 +263,11 @@ export default function TradePage() {
             <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800">
               {(() => {
                 const diff = result.receive_value - result.give_value;
-                const bigger = Math.max(result.give_value, result.receive_value, 1);
+                const bigger = Math.max(
+                  result.give_value,
+                  result.receive_value,
+                  1,
+                );
                 const meaningful = Math.abs(diff) / bigger >= 0.08;
                 const verdictColor =
                   meaningful && diff > 0
@@ -234,11 +278,17 @@ export default function TradePage() {
                 return (
                   <div className="flex items-center justify-between gap-4">
                     <div className="text-center">
-                      <p className="text-xs uppercase tracking-wide text-gray-500">You give</p>
-                      <p className="text-3xl font-extrabold tabular-nums">{result.give_value.toFixed(1)}</p>
+                      <p className="text-xs uppercase tracking-wide text-gray-500">
+                        You give
+                      </p>
+                      <p className="text-3xl font-extrabold tabular-nums">
+                        {result.give_value.toFixed(1)}
+                      </p>
                     </div>
                     <div className="flex-1 text-center">
-                      <p className={`text-lg font-bold ${verdictColor}`}>{result.verdict}</p>
+                      <p className={`text-lg font-bold ${verdictColor}`}>
+                        {result.verdict}
+                      </p>
                       <div className="mx-auto mt-2 flex h-2 max-w-xs overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
                         <div
                           className="bg-red-400"
@@ -250,8 +300,12 @@ export default function TradePage() {
                       </div>
                     </div>
                     <div className="text-center">
-                      <p className="text-xs uppercase tracking-wide text-gray-500">You receive</p>
-                      <p className="text-3xl font-extrabold tabular-nums">{result.receive_value.toFixed(1)}</p>
+                      <p className="text-xs uppercase tracking-wide text-gray-500">
+                        You receive
+                      </p>
+                      <p className="text-3xl font-extrabold tabular-nums">
+                        {result.receive_value.toFixed(1)}
+                      </p>
                     </div>
                   </div>
                 );
@@ -264,9 +318,14 @@ export default function TradePage() {
                     key={p.id}
                     className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs dark:border-gray-800 dark:bg-gray-900"
                   >
-                    {p.name}: <strong className="tabular-nums">{p.value.toFixed(1)}</strong>
+                    {p.name}:{" "}
+                    <strong className="tabular-nums">
+                      {p.value.toFixed(1)}
+                    </strong>
                     <TrendArrow trend={p.trend} />
-                    {p.ppg != null && <span className="text-gray-400"> · {p.ppg} ppg</span>}
+                    {p.ppg != null && (
+                      <span className="text-gray-400"> · {p.ppg} ppg</span>
+                    )}
                   </span>
                 ))}
               </div>
@@ -289,7 +348,9 @@ export default function TradePage() {
                 remarkPlugins={[remarkGfm]}
                 components={{
                   table: ({ children }) => (
-                    <table className="mb-3 w-full border-collapse text-xs">{children}</table>
+                    <table className="mb-3 w-full border-collapse text-xs">
+                      {children}
+                    </table>
                   ),
                   th: ({ children }) => (
                     <th className="border border-gray-200 bg-gray-50 px-2 py-1 text-left font-semibold">
@@ -297,7 +358,9 @@ export default function TradePage() {
                     </th>
                   ),
                   td: ({ children }) => (
-                    <td className="border border-gray-200 px-2 py-1">{children}</td>
+                    <td className="border border-gray-200 px-2 py-1">
+                      {children}
+                    </td>
                   ),
                 }}
               >

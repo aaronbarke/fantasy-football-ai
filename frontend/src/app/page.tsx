@@ -1,125 +1,143 @@
 import Link from "next/link";
 import {
+  ArrowRight,
+  ArrowUpRight,
   ArrowLeftRight,
-  Bot,
   ClipboardList,
-  CloudSun,
-  LineChart,
-  TrendingUp,
-  Trophy,
-  Zap,
+  MessageSquare,
+  Radio,
 } from "lucide-react";
+import Brand from "@/components/Brand";
+import PlaybookField from "@/components/PlaybookField";
 
 const features = [
   {
     icon: ClipboardList,
-    title: "Weekly Game Plan",
-    body: "One click builds your optimal lineup, projects your score, and computes win odds against this week's opponent.",
-    highlight: true,
+    label: "01 / EVERY WEEK",
+    title: "Build a better lineup.",
+    body: "Compare projected points, player matchups, and your bench options in one weekly game plan.",
+    href: "/gameplan",
   },
   {
-    icon: Bot,
-    title: "AI that knows your league",
-    body: "Wired into your real roster, matchups, and scoring settings, not generic takes. Every call it makes gets graded against what actually happened.",
+    icon: MessageSquare,
+    label: "02 / EVERY QUESTION",
+    title: "Talk it through.",
+    body: "Ask about your roster, a close start/sit call, or your next opponent. Get an explanation alongside the numbers.",
+    href: "/chat",
   },
   {
-    icon: TrendingUp,
-    title: "Projection engine",
-    body: "Two seasons of weighted production, defense-vs-position matchups, and Vegas totals. Every player carries a floor and a ceiling.",
+    icon: Radio,
+    label: "03 / EVERY PICK",
+    title: "Be ready on the clock.",
+    body: "Explore player rankings, follow your draft, and practice your strategy with a mock draft.",
+    href: "/draft",
   },
   {
     icon: ArrowLeftRight,
-    title: "Trade analyzer",
-    body: "0-100 player values, a who-wins score, and AI counters with the exact sweeteners to even a lopsided deal.",
+    label: "04 / EVERY OPPORTUNITY",
+    title: "Find your next move.",
+    body: "Compare players, weigh both sides of a trade, and explore available talent in your league.",
+    href: "/trade",
   },
-  {
-    icon: Zap,
-    title: "Betting edge",
-    body: "Live line shopping across US sportsbooks. Best price on every side, ranked by how much the books disagree.",
-  },
-  {
-    icon: CloudSun,
-    title: "Game-day conditions",
-    body: "Wind, rain, and temperature at every stadium, domes included, folded into every recommendation.",
-  },
-];
-
-const stats = [
-  { value: "4,200+", label: "players tracked" },
-  { value: "2", label: "seasons of weekly stats" },
-  { value: "32", label: "defenses ranked by position" },
-  { value: "8+", label: "sportsbooks compared" },
 ];
 
 export default function Landing() {
   return (
-    <main className="min-h-screen bg-gradient-to-b from-green-950 via-green-900 to-gray-950 text-white">
-      <div className="mx-auto max-w-5xl px-6 py-20 text-center">
-        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-green-500/15 ring-1 ring-green-400/30">
-          <Trophy className="h-8 w-8 text-green-400" />
-        </div>
-        <h1 className="text-5xl font-extrabold tracking-tight sm:text-6xl">
-          Fantasy Football <span className="text-green-400">AI</span>
-        </h1>
-        <p className="mx-auto mt-6 max-w-2xl text-lg text-green-100/80">
-          Your league, your roster, real data. An AI co-manager that builds your
-          lineup, grades your trades, and shows its work on every call.
-        </p>
-        <div className="mt-10 flex justify-center gap-4">
-          <Link
-            href="/login"
-            className="rounded-lg bg-green-500 px-7 py-3 font-semibold text-green-950 shadow-lg shadow-green-500/25 hover:bg-green-400"
+    <main className="landing-page">
+      <nav className="landing-nav" aria-label="Main navigation">
+        <Brand href="/" />
+        <div className="flex items-center gap-5">
+          <a
+            href="#playbook"
+            className="hidden text-xs font-semibold sm:inline"
           >
-            Get started free
-          </Link>
-          <Link
-            href="/login"
-            className="rounded-lg border border-green-500/40 px-7 py-3 font-semibold text-green-100 hover:bg-green-500/10"
-          >
+            The playbook
+          </a>
+          <Link href="/login" className="button-secondary">
             Sign in
+            <ArrowUpRight className="h-4 w-4" />
           </Link>
         </div>
-
-        <div className="mt-16 grid grid-cols-2 gap-6 sm:grid-cols-4">
-          {stats.map((s) => (
-            <div key={s.label}>
-              <p className="text-3xl font-extrabold text-green-400">{s.value}</p>
-              <p className="mt-1 text-xs uppercase tracking-wide text-green-100/60">
-                {s.label}
-              </p>
-            </div>
-          ))}
+      </nav>
+      <section className="landing-hero">
+        <div className="hero-copy">
+          <p className="eyebrow">YOUR LEAGUE. YOUR NEXT ADVANTAGE.</p>
+          <h1>
+            Less second-guessing.
+            <br />
+            <span>More game plan.</span>
+          </h1>
+          <p className="hero-description">
+            Your fantasy season has a lot of moving parts. Bring your roster,
+            research, and next decision together with an assistant built around
+            your league.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Link href="/login" className="button-primary">
+              Find your edge
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+            <a href="#playbook" className="button-secondary">
+              Explore the playbook
+            </a>
+          </div>
+          <div className="hero-integrations">
+            <span>BRING YOUR LEAGUE</span>
+            <strong>Sleeper</strong>
+            <span className="h-3 w-px bg-gray-300" />
+            <strong>ESPN</strong>
+          </div>
         </div>
-
-        <div className="mt-20 grid gap-6 text-left sm:grid-cols-2 lg:grid-cols-3">
+        <div className="hero-art">
+          <div className="flex items-center justify-between px-7 pt-7">
+            <span className="text-[10px] font-semibold tracking-[.18em] text-green-200">
+              THE FFAI PLAYBOOK
+            </span>
+            <span className="h-2 w-2 rounded-full bg-lime-200" />
+          </div>
+          <PlaybookField />
+          <div className="field-caption">
+            <span>Prepared beats predictable.</span>
+            <ArrowUpRight className="h-5 w-5" />
+          </div>
+        </div>
+      </section>
+      <section id="playbook" className="landing-features">
+        <div className="mb-9 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="eyebrow">From draft day to game day</p>
+            <h2>
+              A little perspective.
+              <br />A better next move.
+            </h2>
+          </div>
+          <p className="max-w-xs text-sm leading-7 text-gray-500">
+            The tools to make a call, with the context to understand it.
+          </p>
+        </div>
+        <div className="feature-grid">
           {features.map((f) => (
-            <div
-              key={f.title}
-              className={`rounded-xl border p-6 transition-all duration-200 hover:-translate-y-1 ${
-                f.highlight
-                  ? "border-green-400/40 bg-green-500/10 hover:bg-green-500/15 hover:shadow-lg hover:shadow-green-500/10"
-                  : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10 hover:shadow-lg hover:shadow-black/20"
-              }`}
-            >
-              <f.icon className="h-8 w-8 text-green-400" />
-              <h3 className="mt-4 text-lg font-semibold">
-                {f.title}
-                {f.highlight && (
-                  <span className="ml-2 rounded-full bg-green-400/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-green-300">
-                    New
-                  </span>
-                )}
-              </h3>
-              <p className="mt-2 text-sm text-green-100/70">{f.body}</p>
-            </div>
+            <Link href={f.href} key={f.label} className="feature-card">
+              <div className="flex items-center justify-between">
+                <f.icon className="h-5 w-5 text-green-700" strokeWidth={1.6} />
+                <ArrowUpRight className="h-4 w-4 text-gray-400" />
+              </div>
+              <p className="mt-8 text-[9px] font-semibold tracking-[.13em] text-gray-500">
+                {f.label}
+              </p>
+              <h3>{f.title}</h3>
+              <p className="feature-body">{f.body}</p>
+            </Link>
           ))}
         </div>
-
-        <div className="mt-20 flex items-center justify-center gap-2 text-sm text-green-100/50">
-          <LineChart className="h-4 w-4" />
-          Works with Sleeper and ESPN leagues · Installable as an app
-        </div>
-      </div>
+      </section>
+      <footer className="landing-footer">
+        <Brand href="/" />
+        <p>Make an informed call. Enjoy the game.</p>
+        <Link href="/login" className="text-xs font-semibold">
+          Open your workspace <span aria-hidden="true">↗</span>
+        </Link>
+      </footer>
     </main>
   );
 }
