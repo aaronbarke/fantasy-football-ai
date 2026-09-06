@@ -13,7 +13,6 @@ bot that ignores its roster hands you an unrealistically easy draft.
 """
 
 import logging
-import math
 import random
 import uuid
 from collections import Counter
