@@ -18,12 +18,17 @@ narrow one. Confidence reflects sample size and volatility.
 
 import math
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import GameCondition, NflSchedule, Player, PlayerStatsWeekly
 from app.services.external_proj_service import get_external_projections
+from app.services.opportunity_service import (
+    PASS_CATCHER_POSITIONS,
+    compute_opportunity_shares,
+)
 from app.services.schedule_service import defense_vs_position_ranks
 
 PRIOR_SEASON_WEIGHT = 0.5
@@ -34,12 +39,68 @@ VEGAS_PCT_PER_POINT = 0.02  # ±2% projection per implied point above/below avg
 VEGAS_ADJ_CAP = 0.15
 PROJECTABLE = {"QB", "RB", "WR", "TE"}
 
-# Blend weight on Sleeper's weekly projection when available (rest = our model)
-EXTERNAL_WEIGHT = 0.5
+# Blend weight on Sleeper's weekly projection. It starts even with our model
+# early in the week and ramps up toward kickoff, because Sleeper's number is the
+# one that reflects late-breaking news — scratches, actives/inactives, a Friday
+# practice designation. See ``sleeper_blend_weight``.
+EXTERNAL_WEIGHT = 0.5  # early-week floor (our model / Sleeper split 50/50)
+EXTERNAL_WEIGHT_LATE = 0.7  # game-day ceiling — lean on Sleeper's late signal
 # Weather: only matters outdoors; small, position-aware nudges that decide
 # otherwise-close calls (wind hurts passing, rain hurts catching).
 WEATHER_WIND_FLOOR = 12  # mph
 WEATHER_ADJ_CAP = 0.12
+
+# Teammate-injury opportunity boost (see app.services.opportunity_service).
+# opportunity_service works purely in target-share space; here we turn a share
+# of vacated targets into points and cap it.
+#
+# PTS_PER_TARGET_SHARE: PPR points one full (100%) target share is worth per
+# game. A team throws ~35 times a game for ~22 receptions / ~230 yards / ~1.6
+# passing TDs, i.e. roughly 22 + 23 + 10 ≈ 55 PPR points shared across its
+# pass-catchers. We use 45 (below that raw ceiling) because vacated targets are
+# not absorbed 1:1 — some looks disappear with the player, some go to non-
+# receivers — so this stays conservative.
+PTS_PER_TARGET_SHARE = 45.0
+# Boost cap: never more than this fraction of the player's own baseline, and
+# never more than this many absolute points. One injury shouldn't manufacture an
+# absurd projection.
+OPP_BOOST_BASE_FRAC = 0.35
+OPP_BOOST_ABS_CAP = 6.0
+
+
+def sleeper_blend_weight(now: datetime | None, kickoff: datetime | None) -> float:
+    """Weight on Sleeper's projection in the blend, ramped toward kickoff.
+
+    Sleeper's weekly number moves with late news, so we trust it more as the
+    game nears. Bounded to ``[EXTERNAL_WEIGHT, EXTERNAL_WEIGHT_LATE]``.
+
+    - With a known ``kickoff``: linear ramp over the final 72 hours — the floor
+      at 3+ days out, the ceiling at kickoff. Healthy early-week projections
+      barely move; the shift matters most Sunday morning.
+    - Without a kickoff time: fall back to a day-of-week schedule (Tue/Wed early,
+      creeping up Thu–Sat, full lean on Sun/Mon game days).
+    """
+    lo, hi = EXTERNAL_WEIGHT, EXTERNAL_WEIGHT_LATE
+    if now is not None and kickoff is not None:
+        hours_out = (kickoff - now).total_seconds() / 3600.0
+        if hours_out >= 72:
+            return lo
+        if hours_out <= 0:
+            return hi
+        # 72h out → lo, 0h out → hi
+        return hi - (hi - lo) * (hours_out / 72.0)
+
+    ref = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    by_dow = {
+        0: hi,          # Mon (MNF)
+        1: lo,          # Tue
+        2: lo,          # Wed
+        3: lo + 0.05,   # Thu (TNF teams aside, mostly early)
+        4: lo + 0.10,   # Fri
+        5: lo + 0.15,   # Sat
+        6: hi,          # Sun (main slate)
+    }
+    return max(lo, min(hi, by_dow.get(ref.weekday(), lo)))
 
 
 def _weather_adjust(position: str | None, base: float, gc: GameCondition | None) -> float:
@@ -162,7 +223,12 @@ async def compute_projections(
                 (g.away_team, g.home_team, False),
             ):
                 if team in teams and team not in next_opponent:
-                    next_opponent[team] = {"opponent": opp, "week": g.week, "home": home}
+                    next_opponent[team] = {
+                        "opponent": opp,
+                        "week": g.week,
+                        "home": home,
+                        "kickoff": g.game_time,
+                    }
 
         conditions = (
             await db.execute(
@@ -194,6 +260,15 @@ async def compute_projections(
     external = (
         await get_external_projections(season, target_week) if target_week else {}
     )
+
+    # Teammate-injury opportunity: per team, work out how much target share an
+    # officially-absent pass-catcher vacates and who absorbs it. We must look at
+    # the FULL team, not just the requested player_ids, so query every
+    # pass-catcher on the teams in play (with their recent target share).
+    opp_shares = await _opportunity_shares(db, teams)
+
+    # Naive UTC to match the DB's naive game_time for the kickoff ramp.
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     out: dict[str, dict] = {}
     for p in players:
@@ -233,10 +308,31 @@ async def compute_projections(
         model_proj = base + matchup_adj + vegas_adj + weather_adj
         ext = external.get(p.id)
         if ext is not None:
-            # Blend our model with Sleeper's weekly projection
-            projected = max(0.0, EXTERNAL_WEIGHT * ext + (1 - EXTERNAL_WEIGHT) * model_proj)
+            # Blend our model with Sleeper's weekly projection, leaning harder on
+            # Sleeper as kickoff nears (it reflects late-breaking news).
+            w = sleeper_blend_weight(now, game["kickoff"] if game else None)
+            projected = max(0.0, w * ext + (1 - w) * model_proj)
         else:
             projected = max(0.0, model_proj)
+
+        # Teammate-injury opportunity boost — purely additive, and exactly 0.0
+        # when no qualifying teammate is out, so healthy slates are unchanged.
+        opportunity_adj = 0.0
+        boost_reason = None
+        opp = opp_shares.get(p.id)
+        if opp:
+            raw = opp["extra_share"] * PTS_PER_TARGET_SHARE
+            cap = min(OPP_BOOST_BASE_FRAC * base, OPP_BOOST_ABS_CAP)
+            opportunity_adj = round(min(raw, cap), 1)
+            if opportunity_adj > 0:
+                boost_reason = (
+                    f"{opp['reason_prefix']} — +{opportunity_adj:.1f} from vacated targets"
+                )
+            else:
+                opportunity_adj = 0.0
+        if opportunity_adj:
+            projected = max(0.0, projected + opportunity_adj)
+
         games_played = len(samples)
         cv = sigma / base if base > 0 else 1.0
         confidence = (
@@ -251,15 +347,90 @@ async def compute_projections(
             "ceiling": round(projected + 1.1 * sigma, 1),
             "confidence": confidence,
             "stdev": round(sigma, 1),
+            "boost_reason": boost_reason,
             "components": {
                 "base_ppg": round(base, 1),
                 "matchup_adj": round(matchup_adj, 1),
                 "vegas_adj": round(vegas_adj, 1),
                 "weather_adj": round(weather_adj, 1),
+                "opportunity_adj": opportunity_adj,
                 "external_proj": round(ext, 1) if ext is not None else None,
                 "opponent": opponent,
                 "week": game["week"] if game else None,
                 "home": game["home"] if game else None,
             },
         }
+    return out
+
+
+async def _opportunity_shares(db: AsyncSession, teams: set[str]) -> dict[str, dict]:
+    """player_id → {"extra_share", "reason_prefix"} for every pass-catcher who
+    inherits vacated targets from an officially-absent teammate. ``{}`` when no
+    team has a qualifying absence.
+
+    Loads the full pass-catcher pool for ``teams`` (not just the requested
+    players) plus each player's recent-season average target share, then defers
+    the redistribution to ``opportunity_service``.
+    """
+    if not teams:
+        return {}
+
+    catchers = (
+        await db.execute(
+            select(
+                Player.id,
+                Player.full_name,
+                Player.position,
+                Player.team,
+                Player.injury_status,
+                Player.depth_chart_order,
+            ).where(
+                Player.team.in_(teams),
+                Player.position.in_(PASS_CATCHER_POSITIONS),
+            )
+        )
+    ).all()
+    if not catchers:
+        return {}
+
+    # Recent-season average target share per player (most recent season that has
+    # target-share data), from the regular season only.
+    ts_rows = (
+        await db.execute(
+            select(
+                PlayerStatsWeekly.player_id,
+                PlayerStatsWeekly.season,
+                PlayerStatsWeekly.target_share,
+            ).where(
+                PlayerStatsWeekly.player_id.in_([c.id for c in catchers]),
+                PlayerStatsWeekly.week <= REGULAR_SEASON_MAX_WEEK,
+                PlayerStatsWeekly.target_share.is_not(None),
+            )
+        )
+    ).all()
+    by_player: dict[str, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for r in ts_rows:
+        by_player[r.player_id][r.season].append(float(r.target_share))
+    avg_share: dict[str, float] = {}
+    for pid, by_season in by_player.items():
+        season = max(by_season)  # most recent season with data
+        vals = by_season[season]
+        avg_share[pid] = sum(vals) / len(vals) if vals else 0.0
+
+    by_team: dict[str, list[dict]] = defaultdict(list)
+    for c in catchers:
+        by_team[c.team].append(
+            {
+                "id": c.id,
+                "name": c.full_name,
+                "position": c.position,
+                "target_share": avg_share.get(c.id, 0.0),
+                "depth_chart_order": c.depth_chart_order,
+                "injury_status": c.injury_status,
+            }
+        )
+
+    out: dict[str, dict] = {}
+    for team_catchers in by_team.values():
+        out.update(compute_opportunity_shares(team_catchers))
     return out

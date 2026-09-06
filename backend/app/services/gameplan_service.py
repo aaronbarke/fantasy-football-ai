@@ -122,6 +122,8 @@ async def _player_cards(
                 "matchup_adj": (proj.get("components") or {}).get("matchup_adj"),
                 "vegas_adj": (proj.get("components") or {}).get("vegas_adj"),
                 "weather_adj": (proj.get("components") or {}).get("weather_adj"),
+                "opportunity_adj": (proj.get("components") or {}).get("opportunity_adj"),
+                "boost_reason": proj.get("boost_reason"),
                 "external_proj": (proj.get("components") or {}).get("external_proj"),
             }
         )
