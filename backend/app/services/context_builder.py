@@ -21,6 +21,7 @@ from app.models import (
     PlayerStatsWeekly,
     Roster,
 )
+from app.services.projection_service import compute_projections
 from app.services.schedule_service import (
     defense_vs_position_ranks,
     latest_stats_season,
@@ -251,6 +252,7 @@ async def _roster_names(
         if p is None:
             return {"id": pid, "name": pid}
         return {
+            "id": p.id,
             "name": p.full_name,
             "position": p.position,
             "team": p.team,
@@ -261,6 +263,48 @@ async def _roster_names(
     starters = [brief(pid) for pid in starter_ids if pid in by_id]
     bench = [brief(pid) for pid in all_ids if pid not in set(starter_ids)]
     return starters, bench
+
+
+def _compact_projection(pkg: dict) -> dict:
+    """The few projection fields worth injecting into the prompt — the same
+    weekly numbers the game plan and start/sit optimizer use, so chat advice
+    stays consistent with those surfaces."""
+    out = {
+        "projected": pkg.get("projected"),
+        "floor": pkg.get("floor"),
+        "ceiling": pkg.get("ceiling"),
+        "confidence": pkg.get("confidence"),
+    }
+    # Only surface the injury-driven reasons when they actually fired.
+    if pkg.get("boost_reason"):
+        out["opportunity_boost"] = pkg["boost_reason"]
+    if pkg.get("defense_reason"):
+        out["matchup_boost"] = pkg["defense_reason"]
+    return out
+
+
+async def _attach_projections(
+    db: AsyncSession, context: dict[str, Any], season: int
+) -> None:
+    """Anchor every surfaced player on the projection engine. Without this the
+    chat reasons about drops/adds/start-sit from names and trending adds alone
+    and can contradict the projection-driven game plan (e.g. telling you to drop
+    the same TE the lineup optimizer starts)."""
+    buckets: list[dict] = []
+    roster = context.get("user_roster") or {}
+    buckets += roster.get("starters", []) + roster.get("bench", [])
+    buckets += (context.get("opponent") or {}).get("starters", [])
+    buckets += context.get("waiver_wire", [])
+    buckets += context.get("players", [])
+
+    ids = {item["id"] for item in buckets if item.get("id")}
+    if not ids:
+        return
+    proj_map = await compute_projections(db, list(ids), season)
+    for item in buckets:
+        pkg = proj_map.get(item.get("id"))
+        if pkg:
+            item["projection"] = _compact_projection(pkg)
 
 
 async def build_context(
@@ -316,6 +360,7 @@ async def build_context(
         ).all()
         context["waiver_wire"] = [
             {
+                "id": p.id,
                 "name": p.full_name,
                 "position": p.position,
                 "team": p.team,
@@ -365,4 +410,5 @@ async def build_context(
                         "starters": opp_starters,
                     }
 
+    await _attach_projections(db, context, season)
     return intent, context

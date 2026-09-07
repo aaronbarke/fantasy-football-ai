@@ -32,8 +32,16 @@ points above/below average that defense allows the position — quote it.
 - upcoming_game: Vegas spread, implied team total (the best single predictor of \
 fantasy scoring), and weather. Implied total 25+ is a smash spot; under 19 is a \
 fade signal. Wind over 15 mph hurts passing; rain hurts catching.
-- projections (when present): projected/floor/ceiling are model outputs — anchor \
-on them and explain WHY the model likes or dislikes the spot.
+- projection (when present): projected/floor/ceiling/confidence are the model's \
+weekly forecast — the SAME numbers the game plan and start/sit optimizer use. \
+Anchor on them and explain WHY the model likes or dislikes the spot. When \
+recommending an add, drop, or start/sit, rank the players by projected first; \
+trending_adds, recent_ppr_avg and name recognition are secondary tie-breakers, \
+never a reason to bench or drop a higher-projected player. opportunity_boost / \
+matchup_boost, when set, explain an injury-driven bump already baked into \
+projected — cite them. Never tell the user to drop a player who out-projects the \
+one you'd add without saying plainly that you're prioritizing rest-of-season \
+upside over this week's points.
 - candidates (draft questions): each is a season-long draft evaluation. vor is \
 projected points above the last startable player at that position — it is the \
 ranking backbone and is comparable ACROSS positions, unlike raw proj_points. \
