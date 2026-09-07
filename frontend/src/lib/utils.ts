@@ -1,22 +1,16 @@
-/** Traffic-light severity for a game-status string. "out" (red) covers Out,
- * Doubtful and IR / Injured Reserve; "questionable" (yellow); everything else,
- * including Active and a missing status, is "healthy" (green). Matching "injured"
- * and "reserve" as well as "ir" so "Injured Reserve" doesn't slip through. */
+/** Traffic-light severity for a game-status string. Only "Active" (or a missing
+ * status, which renders no badge anyway) is "healthy" (green); "questionable" is
+ * yellow; everything else — Out, Doubtful, IR / Injured Reserve, Suspension, or
+ * any unknown designation — is "out" (red). Conservative on purpose: an
+ * unrecognized status reads as red rather than a false green. */
 export function injurySeverity(
   status: string | null | undefined,
 ): "out" | "questionable" | "healthy" {
   if (!status) return "healthy";
-  const s = status.toLowerCase();
-  if (
-    s.includes("out") ||
-    s.includes("doubtful") ||
-    s.includes("ir") ||
-    s.includes("injured") ||
-    s.includes("reserve")
-  )
-    return "out";
+  const s = status.toLowerCase().trim();
   if (s.includes("questionable")) return "questionable";
-  return "healthy";
+  if (s === "active") return "healthy";
+  return "out";
 }
 
 /** Pill (background + text) classes for a status badge. */
