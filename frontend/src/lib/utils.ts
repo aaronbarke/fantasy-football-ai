@@ -1,11 +1,46 @@
-export function injuryColor(status: string | null | undefined): string {
-  if (!status) return "bg-green-100 text-green-800";
+/** Traffic-light severity for a game-status string. "out" (red) covers Out,
+ * Doubtful and IR / Injured Reserve; "questionable" (yellow); everything else,
+ * including Active and a missing status, is "healthy" (green). Matching "injured"
+ * and "reserve" as well as "ir" so "Injured Reserve" doesn't slip through. */
+export function injurySeverity(
+  status: string | null | undefined,
+): "out" | "questionable" | "healthy" {
+  if (!status) return "healthy";
   const s = status.toLowerCase();
-  if (s.includes("out") || s.includes("ir") || s.includes("doubtful"))
-    return "bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300";
-  if (s.includes("questionable"))
-    return "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300";
-  return "bg-green-100 text-green-800";
+  if (
+    s.includes("out") ||
+    s.includes("doubtful") ||
+    s.includes("ir") ||
+    s.includes("injured") ||
+    s.includes("reserve")
+  )
+    return "out";
+  if (s.includes("questionable")) return "questionable";
+  return "healthy";
+}
+
+/** Pill (background + text) classes for a status badge. */
+export function injuryColor(status: string | null | undefined): string {
+  switch (injurySeverity(status)) {
+    case "out":
+      return "bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300";
+    case "questionable":
+      return "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300";
+    default:
+      return "bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300";
+  }
+}
+
+/** Text-only color classes, for status rendered as inline text (no pill). */
+export function injuryTextColor(status: string | null | undefined): string {
+  switch (injurySeverity(status)) {
+    case "out":
+      return "text-red-500 dark:text-red-400";
+    case "questionable":
+      return "text-amber-500 dark:text-amber-400";
+    default:
+      return "text-green-600 dark:text-green-400";
+  }
 }
 
 export function positionColor(position: string | null | undefined): string {

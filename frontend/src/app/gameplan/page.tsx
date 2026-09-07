@@ -7,7 +7,7 @@ import { EmptyState, LoadingState, ErrorState } from "@/components/PageState";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import PlayerAvatar from "@/components/PlayerAvatar";
-import { positionColor } from "@/lib/utils";
+import { injuryTextColor, positionColor } from "@/lib/utils";
 import { ArrowRightLeft, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -143,7 +143,7 @@ function PlayerRow({ p, slot }: { p: PlanPlayer | null; slot?: string }) {
           <p className="truncate text-sm font-semibold">
             {p.name}
             {p.injury_status && (
-              <span className="ml-2 text-xs font-medium text-red-500">
+              <span className={`ml-2 text-xs font-medium ${injuryTextColor(p.injury_status)}`}>
                 {p.injury_status}
               </span>
             )}
