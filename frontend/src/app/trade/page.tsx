@@ -181,6 +181,30 @@ interface TradeResult {
   sweeteners: TradePlayerValue[];
 }
 
+type FinderPlayer = {
+  id: string;
+  name: string;
+  position: string | null;
+  team: string | null;
+  value: number | null;
+  ppg: number | null;
+  trend: string | null;
+};
+
+type FinderTrade = {
+  partner: { team_id: string; owner_name: string; record: string };
+  give: FinderPlayer;
+  receive: FinderPlayer;
+  value_gap: number;
+  your_lineup_gain: number;
+  their_lineup_gain: number;
+  rationale: string;
+};
+
+function finderPlayerCard(p: FinderPlayer): PlayerCard {
+  return { id: p.id, name: p.name, position: p.position, team: p.team };
+}
+
 export default function TradePage() {
   const { league } = useLeague();
   const [give, setGive] = useState<PlayerCard[]>([]);
@@ -189,7 +213,37 @@ export default function TradePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [finderTrades, setFinderTrades] = useState<FinderTrade[]>([]);
+  const [finding, setFinding] = useState(false);
+  const [finderRan, setFinderRan] = useState(false);
+  const [finderError, setFinderError] = useState<string | null>(null);
+
   const allIds = [...give, ...receive].map((p) => p.id);
+
+  async function findTrades() {
+    if (!league) return;
+    setFinding(true);
+    setFinderError(null);
+    setFinderRan(false);
+    try {
+      const resp = await api<{ trades: FinderTrade[] }>(
+        `/api/trade/finder?connection_id=${encodeURIComponent(league.id)}`,
+      );
+      setFinderTrades(resp.trades);
+      setFinderRan(true);
+    } catch (err) {
+      setFinderError(err instanceof Error ? err.message : "Trade search failed");
+    } finally {
+      setFinding(false);
+    }
+  }
+
+  function loadIntoAnalyzer(t: FinderTrade) {
+    setGive([finderPlayerCard(t.give)]);
+    setReceive([finderPlayerCard(t.receive)]);
+    setResult(null);
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  }
 
   async function analyze() {
     if (!league || give.length === 0 || receive.length === 0) return;
@@ -226,6 +280,81 @@ export default function TradePage() {
           description="Weigh what you give, what you get, and how the deal fits your roster."
           eyebrow="Make your move"
         />
+
+        <div className="mt-6 rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900/40">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="flex items-center gap-2 text-base font-bold">
+                <Search className="h-4 w-4 text-green-600" />
+                Trade Finder
+              </h2>
+              <p className="mt-0.5 text-sm text-gray-500">
+                Auto-scan the league for fair, win-win deals that upgrade your
+                lineup — no typing required.
+              </p>
+            </div>
+            <button
+              onClick={findTrades}
+              disabled={finding || !league}
+              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-500 disabled:opacity-50"
+            >
+              {finding ? "Scanning league…" : "Find trades for me"}
+            </button>
+          </div>
+
+          {finderError && (
+            <p className="mt-3 text-sm text-red-500">{finderError}</p>
+          )}
+          {finderRan && !finding && finderTrades.length === 0 && (
+            <p className="mt-3 text-sm text-gray-500">
+              No clean win-win trades right now — your roster looks balanced, or
+              no partner lines up on value. Try the manual analyzer below.
+            </p>
+          )}
+
+          {finderTrades.length > 0 && (
+            <ul className="mt-4 space-y-3">
+              {finderTrades.map((t, i) => (
+                <li
+                  key={i}
+                  className="rounded-lg border border-gray-200 p-3 dark:border-gray-800"
+                >
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span>
+                      with <span className="font-semibold text-gray-700 dark:text-gray-300">{t.partner.owner_name}</span>{" "}
+                      ({t.partner.record})
+                    </span>
+                    <span className="font-semibold text-green-600">
+                      +{t.your_lineup_gain} pts/wk
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-medium">
+                    <span className="text-red-500">
+                      Give {t.give.name}
+                      <span className="ml-1 text-xs text-gray-400">
+                        {t.give.position} · {t.give.team}
+                      </span>
+                    </span>
+                    <ArrowLeftRight className="h-4 w-4 text-gray-400" />
+                    <span className="text-green-600 dark:text-green-400">
+                      Get {t.receive.name}
+                      <span className="ml-1 text-xs text-gray-400">
+                        {t.receive.position} · {t.receive.team}
+                      </span>
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">{t.rationale}</p>
+                  <button
+                    onClick={() => loadIntoAnalyzer(t)}
+                    className="mt-2 text-xs font-semibold text-green-600 hover:underline"
+                  >
+                    Analyze this deal →
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
         <div className="mt-6 grid gap-6 md:grid-cols-2">
           <TradeSide

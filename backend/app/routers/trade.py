@@ -10,10 +10,30 @@ from app.database import get_db
 from app.models import LeagueConnection, Player, Roster, User
 from app.services.ai_service import generate_response
 from app.services.context_builder import player_package
+from app.services.trade_finder_service import find_trades
 from app.services.value_service import compute_player_values, side_total
 from app.utils.security import get_current_user
 
 router = APIRouter(prefix="/api/trade", tags=["trade"])
+
+
+async def _owned_connection(
+    connection_id: str, user: User, db: AsyncSession
+) -> LeagueConnection:
+    try:
+        cid = uuid.UUID(connection_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid connection id")
+    conn = (
+        await db.execute(
+            select(LeagueConnection).where(
+                LeagueConnection.id == cid, LeagueConnection.user_id == user.id
+            )
+        )
+    ).scalar_one_or_none()
+    if conn is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "League connection not found")
+    return conn
 
 TRADE_QUESTION = (
     "Evaluate this trade. The user GIVES the players in trade.give and "
@@ -228,3 +248,25 @@ async def analyze_trade(
         ],
         sweeteners=sweeteners,
     )
+
+
+class TradeFinderResponse(BaseModel):
+    trades: list[dict]
+
+
+@router.get("/finder", response_model=TradeFinderResponse)
+async def trade_finder(
+    connection_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Auto-scan the league for roughly-even, win-win 1-for-1 trades that upgrade
+    the user's lineup. No prompt needed — deterministic and self-ranked."""
+    conn = await _owned_connection(connection_id, user, db)
+    if not conn.team_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This league connection isn't linked to one of your teams yet.",
+        )
+    trades = await find_trades(db, conn)
+    return TradeFinderResponse(trades=trades)
