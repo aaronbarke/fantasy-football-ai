@@ -1,9 +1,11 @@
+import uuid
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base
-from app.models import Player, PlayerStatsWeekly
-from app.services.context_builder import _attach_projections, classify_intent
+from app.models import LeagueConnection, Player, PlayerStatsWeekly, Roster
+from app.services.context_builder import _attach_projections, build_context, classify_intent
 
 SEASON = 2025
 
@@ -19,8 +21,8 @@ async def db():
     await engine.dispose()
 
 
-async def _seed(db, pid, ppg):
-    db.add(Player(id=pid, full_name=pid.upper(), position="TE", team="NO"))
+async def _seed(db, pid, ppg, position="TE", team="NO"):
+    db.add(Player(id=pid, full_name=pid.upper(), position=position, team=team))
     for wk in range(1, 5):
         db.add(PlayerStatsWeekly(player_id=pid, season=SEASON, week=wk, fantasy_points_ppr=ppg))
     await db.commit()
@@ -86,3 +88,46 @@ async def test_attach_projections_noop_without_ids(db: AsyncSession):
     context = {"user_roster": {"starters": [], "bench": []}}
     await _attach_projections(db, context, SEASON)  # must not raise
     assert context["user_roster"]["starters"] == []
+
+
+async def test_trade_intent_surfaces_other_teams_with_projections(db: AsyncSession):
+    """A trade question now exposes every OTHER team's roster (with projections)
+    so the assistant can find realistic targets — not just the user's own team."""
+    await _seed(db, "my_qb", 20.0, position="QB", team="BUF")
+    await _seed(db, "rival_rb", 17.0, position="RB", team="SF")
+
+    conn = LeagueConnection(
+        id=uuid.uuid4(), user_id=uuid.uuid4(), platform="sleeper",
+        league_id="L1", season=SEASON, scoring_type="ppr", team_id="t1",
+    )
+    db.add(conn)
+    db.add(Roster(connection_id=conn.id, team_id="t1", owner_name="Me",
+                  players=["my_qb"], starters=["my_qb"], wins=2, losses=1))
+    db.add(Roster(connection_id=conn.id, team_id="t2", owner_name="Rival",
+                  players=["rival_rb"], starters=["rival_rb"], wins=3, losses=0))
+    await db.commit()
+
+    intent, ctx = await build_context(db, conn, "What trade should I target to upgrade my RB?")
+
+    assert intent == "trade"
+    league = ctx["league_rosters"]
+    # only the OTHER team, never the user's own
+    assert [t["owner_name"] for t in league] == ["Rival"]
+    rival_player = league[0]["starters"][0]
+    assert rival_player["name"] == "RIVAL_RB"
+    assert rival_player["projection"]["projected"] > 0   # same numbers the game plan uses
+
+
+async def test_non_trade_intent_has_no_league_rosters(db: AsyncSession):
+    await _seed(db, "my_qb", 20.0, position="QB", team="BUF")
+    conn = LeagueConnection(
+        id=uuid.uuid4(), user_id=uuid.uuid4(), platform="sleeper",
+        league_id="L1", season=SEASON, scoring_type="ppr", team_id="t1",
+    )
+    db.add(conn)
+    db.add(Roster(connection_id=conn.id, team_id="t1", owner_name="Me", players=["my_qb"]))
+    db.add(Roster(connection_id=conn.id, team_id="t2", owner_name="Rival", players=[]))
+    await db.commit()
+
+    _, ctx = await build_context(db, conn, "Who should I start at QB this week?")
+    assert "league_rosters" not in ctx

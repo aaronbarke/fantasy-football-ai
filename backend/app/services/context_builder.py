@@ -265,6 +265,10 @@ async def _roster_names(
     return starters, bench
 
 
+def _record(wins: int, losses: int, ties: int) -> str:
+    return f"{wins}-{losses}-{ties}" if ties else f"{wins}-{losses}"
+
+
 def _compact_projection(pkg: dict) -> dict:
     """The few projection fields worth injecting into the prompt — the same
     weekly numbers the game plan and start/sit optimizer use, so chat advice
@@ -296,6 +300,8 @@ async def _attach_projections(
     buckets += (context.get("opponent") or {}).get("starters", [])
     buckets += context.get("waiver_wire", [])
     buckets += context.get("players", [])
+    for team in context.get("league_rosters", []):
+        buckets += team.get("starters", []) + team.get("bench", [])
 
     ids = {item["id"] for item in buckets if item.get("id")}
     if not ids:
@@ -409,6 +415,32 @@ async def build_context(
                         "record": f"{opp_roster.wins}-{opp_roster.losses}",
                         "starters": opp_starters,
                     }
+
+    # Trade questions need to see the rest of the league — who has a surplus at
+    # your position of need, and who needs what you can spare. Every team's full
+    # roster (starters + bench) so the AI can spot realistic, win-win targets.
+    if intent == "trade" and conn:
+        league = (
+            await db.execute(
+                select(Roster).where(Roster.connection_id == conn.id)
+            )
+        ).scalars().all()
+        others = [r for r in league if r.team_id != conn.team_id]
+        league_rosters = []
+        for r in others:
+            starters, bench = await _roster_names(db, r)
+            league_rosters.append(
+                {
+                    "owner_name": r.owner_name or r.team_id,
+                    "team_id": r.team_id,
+                    "record": _record(r.wins, r.losses, r.ties),
+                    "points_for": round(float(r.points_for or 0), 1),
+                    "starters": starters,
+                    "bench": bench,
+                }
+            )
+        if league_rosters:
+            context["league_rosters"] = league_rosters
 
     await _attach_projections(db, context, season)
     return intent, context

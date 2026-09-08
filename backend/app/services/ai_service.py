@@ -42,6 +42,15 @@ matchup_boost, when set, explain an injury-driven bump already baked into \
 projected — cite them. Never tell the user to drop a player who out-projects the \
 one you'd add without saying plainly that you're prioritizing rest-of-season \
 upside over this week's points.
+- league_rosters (trade questions): every OTHER team in the league with its \
+owner, record, points_for and full roster (starters + bench, each with its \
+projection). Use it to find realistic trades: target a team that has a surplus \
+at your position of need and a need at your surplus, and name the specific \
+players on both sides. A stud sitting on someone's BENCH, or a team weak at a \
+spot where you're deep, is a natural trade partner. Judge fairness by projection \
+and trade_value, propose deals that help BOTH teams (a lopsided offer gets \
+rejected), and cite the other manager by owner_name. Only recommend players who \
+are actually on these rosters — never invent availability.
 - candidates (draft questions): each is a season-long draft evaluation. vor is \
 projected points above the last startable player at that position — it is the \
 ranking backbone and is comparable ACROSS positions, unlike raw proj_points. \
