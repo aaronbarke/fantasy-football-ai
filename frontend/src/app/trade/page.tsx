@@ -193,13 +193,21 @@ type FinderPlayer = {
 
 type FinderTrade = {
   partner: { team_id: string; owner_name: string; record: string };
-  give: FinderPlayer;
-  receive: FinderPlayer;
+  give: FinderPlayer[];
+  receive: FinderPlayer[];
+  give_value: number;
+  receive_value: number;
   value_gap: number;
   your_lineup_gain: number;
   their_lineup_gain: number;
   rationale: string;
 };
+
+function playerLabel(players: FinderPlayer[]): string {
+  return players
+    .map((p) => `${p.name} (${p.position ?? "?"}${p.team ? ` · ${p.team}` : ""})`)
+    .join(" + ");
+}
 
 function finderPlayerCard(p: FinderPlayer): PlayerCard {
   return { id: p.id, name: p.name, position: p.position, team: p.team };
@@ -239,8 +247,8 @@ export default function TradePage() {
   }
 
   function loadIntoAnalyzer(t: FinderTrade) {
-    setGive([finderPlayerCard(t.give)]);
-    setReceive([finderPlayerCard(t.receive)]);
+    setGive(t.give.map(finderPlayerCard));
+    setReceive(t.receive.map(finderPlayerCard));
     setResult(null);
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   }
@@ -329,18 +337,10 @@ export default function TradePage() {
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-medium">
-                    <span className="text-red-500">
-                      Give {t.give.name}
-                      <span className="ml-1 text-xs text-gray-400">
-                        {t.give.position} · {t.give.team}
-                      </span>
-                    </span>
-                    <ArrowLeftRight className="h-4 w-4 text-gray-400" />
+                    <span className="text-red-500">Give {playerLabel(t.give)}</span>
+                    <ArrowLeftRight className="h-4 w-4 shrink-0 text-gray-400" />
                     <span className="text-green-600 dark:text-green-400">
-                      Get {t.receive.name}
-                      <span className="ml-1 text-xs text-gray-400">
-                        {t.receive.position} · {t.receive.team}
-                      </span>
+                      Get {playerLabel(t.receive)}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-gray-500">{t.rationale}</p>

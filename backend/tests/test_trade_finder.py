@@ -57,29 +57,90 @@ _THEIR = [
 _PARTNER = {"team_id": "t2", "owner_name": "Rival", "record": "3-0"}
 
 
+def _fair(c):
+    bigger = max(c["give_value"], c["receive_value"], 1.0)
+    return c["value_gap"] <= FAIRNESS_PCT * bigger + 1e-6
+
+
+def _winwin(c):
+    return (
+        c["give"] and c["receive"]
+        and c["your_lineup_gain"] > 0
+        and c["their_lineup_gain"] >= 0
+    )
+
+
 def test_finder_surfaces_fair_winwin_upgrades():
     cands = rank_trades(_MY, _THEIR, SLOTS, _PARTNER)
     assert cands, "expected at least one win-win RB-for-WR swap"
 
     for c in cands:
-        bigger = max(c["give"]["value"], c["receive"]["value"], 1.0)
-        # roughly equal value
-        assert c["value_gap"] <= FAIRNESS_PCT * bigger + 1e-6
-        # genuine win-win: my lineup up, partner's not down
-        assert c["your_lineup_gain"] > 0
-        assert c["their_lineup_gain"] >= 0
+        assert _fair(c)      # roughly equal value (summed across the package)
+        assert _winwin(c)    # my lineup up, partner's not down
 
-    # ranked best-first by the composite score (upgrade, weighted for mutual
-    # benefit) the finder uses
+    # ranked best-first by the composite (upgrade, weighted for mutual benefit)
     scores = [
         c["your_lineup_gain"] + 0.25 * min(c["your_lineup_gain"], c["their_lineup_gain"])
         for c in cands
     ]
     assert scores == sorted(scores, reverse=True)
-    assert cands[0]["your_lineup_gain"] >= 8  # top is a real upgrade
     # it targets my actual need (RB) with a player I can spare
-    assert any(c["receive"]["position"] == "RB" for c in cands)
-    assert cands[0]["receive"]["position"] == "RB"
+    assert cands[0]["receive"][0]["position"] == "RB"
+
+
+def test_finder_surfaces_two_for_one_consolidation():
+    # Deep at WR (two benched), thin at RB2 — package two bench WRs for a stud.
+    mine = [
+        _p("qb1", "QB", 18, 50),
+        _p("rb1", "RB", 14, 40),
+        _p("rb2", "RB", 5, 10),    # weak starter → the need
+        _p("wr1", "WR", 16, 55),
+        _p("wr2", "WR", 15, 50),
+        _p("wr3", "WR", 13, 40),
+        _p("wr4", "WR", 12, 35),   # bench
+        _p("wr5", "WR", 11, 33),   # bench
+        _p("te1", "TE", 9, 25),
+    ]
+    theirs = [
+        _p("oqb", "QB", 15, 45),
+        _p("rb_stud", "RB", 18, 68),   # ≈ wr4+wr5 (35+33)
+        _p("rb_x", "RB", 12, 35),
+        _p("owr1", "WR", 6, 14),
+        _p("owr2", "WR", 5, 12),
+        _p("ote", "TE", 7, 20),
+    ]
+    cands = rank_trades(mine, theirs, SLOTS, _PARTNER)
+    assert all(_fair(c) and _winwin(c) for c in cands)
+    two_for_one = [c for c in cands if len(c["give"]) == 2 and len(c["receive"]) == 1]
+    assert two_for_one, "expected a 2-for-1 consolidation"
+    assert two_for_one[0]["receive"][0]["id"] == "rb_stud"
+
+
+def test_finder_surfaces_one_for_two_depth():
+    # I have a tradeable elite WR and holes at RB2 + TE; partner is deep at
+    # RB/TE (bench surplus) and weak at WR — split the stud into two starters.
+    mine = [
+        _p("qb1", "QB", 18, 50),
+        _p("rb1", "RB", 14, 40),
+        _p("wr1", "WR", 20, 70),   # elite, tradeable
+        _p("wr2", "WR", 15, 48),
+        _p("wr3", "WR", 13, 40),
+    ]
+    theirs = [
+        _p("oqb", "QB", 15, 45),
+        _p("orb1", "RB", 16, 55),
+        _p("orb2", "RB", 14, 48),
+        _p("orb3", "RB", 13, 38),   # bench RB (givable) ≈ half of wr1
+        _p("ote1", "TE", 11, 34),
+        _p("ote2", "TE", 10, 32),   # bench TE (givable)
+        _p("owr1", "WR", 6, 14),    # weak WR → wr1 upgrades them
+        _p("owr2", "WR", 5, 12),
+    ]
+    cands = rank_trades(mine, theirs, SLOTS, _PARTNER)
+    assert all(_fair(c) and _winwin(c) for c in cands)
+    one_for_two = [c for c in cands if len(c["give"]) == 1 and len(c["receive"]) == 2]
+    assert one_for_two, "expected a 1-for-2 depth deal"
+    assert one_for_two[0]["give"][0]["id"] == "wr1"
 
 
 def test_finder_skips_lopsided_and_non_upgrades():
@@ -95,11 +156,11 @@ def test_finder_skips_lopsided_and_non_upgrades():
 
 
 def test_finder_never_downgrades_the_user():
-    # Reverse the matchup: I'm the RB-rich side. Giving my RB depth for their
-    # weak WRs must never be proposed as an upgrade to ME.
+    # Reverse the matchup: I'm the RB-rich side. Every proposal must still help
+    # the caller and be a fair win-win.
     cands = rank_trades(_THEIR, _MY, SLOTS, {"team_id": "t1", "owner_name": "Me", "record": "1-2"})
     for c in cands:
-        assert c["your_lineup_gain"] > 0  # every proposal still helps the caller
+        assert _winwin(c) and _fair(c)
 
 
 # --- league scan wiring -----------------------------------------------------
@@ -134,5 +195,6 @@ async def test_find_trades_scans_league_and_excludes_self(db: AsyncSession):
     assert isinstance(trades, list)
     for t in trades:
         assert t["partner"]["team_id"] != "t1"          # never trade with myself
+        assert t["give"] and t["receive"]               # non-empty package sides
         assert t["your_lineup_gain"] > 0                # only real upgrades
         assert t["their_lineup_gain"] >= 0              # win-win

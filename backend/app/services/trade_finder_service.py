@@ -17,6 +17,8 @@ How it decides:
   only proposes swaps the other manager would plausibly accept.
 """
 
+from itertools import combinations
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,63 +61,92 @@ def _roster_dicts(
     return out
 
 
+def _side_value(players: list[dict]) -> float:
+    return sum(p["value"] or 0.0 for p in players)
+
+
+def _package_rationale(give: list[dict], recv: list[dict], my_gain: float, owner: str) -> str:
+    gives = " + ".join(p["name"] for p in give)
+    gets = " + ".join(p["name"] for p in recv)
+    shape = "consolidate" if len(give) > len(recv) else "add depth" if len(recv) > len(give) else "swap"
+    return (
+        f"Give {gives} for {gets} ({shape}) — about +{my_gain:.1f} pts/wk to your "
+        f"starting lineup, and it doesn't set back {owner}."
+    )
+
+
 def rank_trades(
     my_players: list[dict],
     their_players: list[dict],
     slots: list[str],
     partner: dict,
 ) -> list[dict]:
-    """Pure ranking of 1-for-1 swaps between two rosters. Returns win-win,
-    roughly-even candidates, best (biggest lineup gain for the user) first."""
+    """Pure ranking of win-win, roughly-even packages between two rosters —
+    1-for-1, 2-for-1 (consolidate) and 1-for-2 (add depth). Best lineup gain for
+    the user first. The value-fairness check runs BEFORE the (costlier) lineup
+    re-optimization, so most combinations are rejected cheaply."""
     my_base = _lineup_points(slots, my_players)
     their_base = _lineup_points(slots, their_players)
 
+    my_pool = [p for p in my_players if p["value"] is not None and p["position"] in VALUED_POSITIONS]
+    their_pool = [p for p in their_players if p["value"] is not None and p["position"] in VALUED_POSITIONS]
+
+    my_singles = [[p] for p in my_pool]
+    my_pairs = [list(c) for c in combinations(my_pool, 2)]
+    their_singles = [[p] for p in their_pool]
+    their_pairs = [list(c) for c in combinations(their_pool, 2)]
+
+    # (give options, receive options): 1-for-1, 2-for-1 (consolidate), 1-for-2 (depth)
+    shapes = [
+        (my_singles, their_singles),
+        (my_pairs, their_singles),
+        (my_singles, their_pairs),
+    ]
+
     out: list[dict] = []
-    for give in my_players:
-        vx = give["value"]
-        if vx is None or give["position"] not in VALUED_POSITIONS:
-            continue
-        for recv in their_players:
-            vy = recv["value"]
-            if vy is None or recv["position"] not in VALUED_POSITIONS:
-                continue
-            bigger = max(vx, vy, 1.0)
-            gap_pct = abs(vx - vy) / bigger
-            if gap_pct > FAIRNESS_PCT:  # not roughly equal value
-                continue
+    for give_opts, recv_opts in shapes:
+        for give in give_opts:
+            gv = _side_value(give)
+            for recv in recv_opts:
+                rv = _side_value(recv)
+                bigger = max(gv, rv, 1.0)
+                if abs(gv - rv) / bigger > FAIRNESS_PCT:  # not roughly equal value
+                    continue
 
-            my_after = [p for p in my_players if p["id"] != give["id"]] + [recv]
-            their_after = [p for p in their_players if p["id"] != recv["id"]] + [give]
-            my_gain = _lineup_points(slots, my_after) - my_base
-            their_gain = _lineup_points(slots, their_after) - their_base
-            # Must upgrade the user and not downgrade the partner (win-win).
-            if my_gain <= 0 or their_gain < 0:
-                continue
+                give_ids = {p["id"] for p in give}
+                recv_ids = {p["id"] for p in recv}
+                my_after = [p for p in my_players if p["id"] not in give_ids] + recv
+                their_after = [p for p in their_players if p["id"] not in recv_ids] + give
+                my_gain = _lineup_points(slots, my_after) - my_base
+                their_gain = _lineup_points(slots, their_after) - their_base
+                if my_gain <= 0 or their_gain < 0:  # must be a genuine win-win
+                    continue
 
-            out.append(
-                {
-                    "partner": partner,
-                    "give": _player_view(give),
-                    "receive": _player_view(recv),
-                    "value_gap": round(abs(vx - vy), 1),
-                    "your_lineup_gain": round(my_gain, 1),
-                    "their_lineup_gain": round(their_gain, 1),
-                    "rationale": (
-                        f"Upgrade your {recv['position']}: give {give['name']} "
-                        f"({vx:.0f}) for {recv['name']} ({vy:.0f}) — about "
-                        f"+{my_gain:.1f} pts/wk to your lineup, and it also helps "
-                        f"{partner['owner_name']} at {give['position']}."
-                    ),
-                }
-            )
+                out.append(
+                    {
+                        "partner": partner,
+                        "give": [_player_view(p) for p in give],
+                        "receive": [_player_view(p) for p in recv],
+                        "give_value": round(gv, 1),
+                        "receive_value": round(rv, 1),
+                        "value_gap": round(abs(gv - rv), 1),
+                        "your_lineup_gain": round(my_gain, 1),
+                        "their_lineup_gain": round(their_gain, 1),
+                        "rationale": _package_rationale(
+                            give, recv, my_gain, partner["owner_name"]
+                        ),
+                    }
+                )
     out.sort(key=_trade_score, reverse=True)
     return out
 
 
-def _trade_score(c: dict) -> tuple[float, float]:
-    """Best upgrade first; tie-break toward mutually beneficial, fairer deals."""
+def _trade_score(c: dict) -> tuple[float, float, float]:
+    """Best upgrade first; tie-break toward mutually beneficial, fairer, and
+    simpler (fewer players) deals."""
     mutual = min(c["your_lineup_gain"], c["their_lineup_gain"])
-    return (c["your_lineup_gain"] + 0.25 * mutual, -c["value_gap"])
+    simplicity = -(len(c["give"]) + len(c["receive"]))
+    return (c["your_lineup_gain"] + 0.25 * mutual, simplicity, -c["value_gap"])
 
 
 def _player_view(p: dict) -> dict:
