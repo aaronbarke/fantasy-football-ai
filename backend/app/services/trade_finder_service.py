@@ -80,11 +80,18 @@ def rank_trades(
     their_players: list[dict],
     slots: list[str],
     partner: dict,
+    target: str | None = None,
+    shed: str | None = None,
 ) -> list[dict]:
     """Pure ranking of win-win, roughly-even packages between two rosters —
     1-for-1, 2-for-1 (consolidate) and 1-for-2 (add depth). Best lineup gain for
     the user first. The value-fairness check runs BEFORE the (costlier) lineup
-    re-optimization, so most combinations are rejected cheaply."""
+    re-optimization, so most combinations are rejected cheaply.
+
+    ``target`` limits results to packages that bring back that position;
+    ``shed`` limits them to packages that give that position away."""
+    target = target.upper() if target else None
+    shed = shed.upper() if shed else None
     my_base = _lineup_points(slots, my_players)
     their_base = _lineup_points(slots, their_players)
 
@@ -106,8 +113,12 @@ def rank_trades(
     out: list[dict] = []
     for give_opts, recv_opts in shapes:
         for give in give_opts:
+            if shed and not any(p["position"] == shed for p in give):
+                continue
             gv = _side_value(give)
             for recv in recv_opts:
+                if target and not any(p["position"] == target for p in recv):
+                    continue
                 rv = _side_value(recv)
                 bigger = max(gv, rv, 1.0)
                 if abs(gv - rv) / bigger > FAIRNESS_PCT:  # not roughly equal value
@@ -162,9 +173,15 @@ def _player_view(p: dict) -> dict:
 
 
 async def find_trades(
-    db: AsyncSession, conn: LeagueConnection, max_results: int = 8
+    db: AsyncSession,
+    conn: LeagueConnection,
+    max_results: int = 8,
+    target: str | None = None,
+    shed: str | None = None,
 ) -> list[dict]:
-    """Ranked win-win 1-for-1 trade candidates across the whole league."""
+    """Ranked win-win trade candidates across the whole league. Optional
+    ``target`` (position to acquire) and ``shed`` (position to trade away)
+    narrow the search."""
     rosters = (
         await db.execute(select(Roster).where(Roster.connection_id == conn.id))
     ).scalars().all()
@@ -196,7 +213,9 @@ async def find_trades(
             + (f"-{other.ties}" if other.ties else ""),
         }
         their_players = _roster_dicts(list(other.players), values, meta)
-        candidates.extend(rank_trades(my_players, their_players, slots, partner))
+        candidates.extend(
+            rank_trades(my_players, their_players, slots, partner, target, shed)
+        )
 
     candidates.sort(key=_trade_score, reverse=True)
     return candidates[:max_results]

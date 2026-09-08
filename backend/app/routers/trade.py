@@ -254,19 +254,39 @@ class TradeFinderResponse(BaseModel):
     trades: list[dict]
 
 
+_TRADE_POSITIONS = {"QB", "RB", "WR", "TE"}
+
+
+def _valid_position(pos: str | None) -> str | None:
+    if not pos:
+        return None
+    p = pos.strip().upper()
+    if p not in _TRADE_POSITIONS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Position must be one of {sorted(_TRADE_POSITIONS)}"
+        )
+    return p
+
+
 @router.get("/finder", response_model=TradeFinderResponse)
 async def trade_finder(
     connection_id: str,
+    target: str | None = None,
+    shed: str | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Auto-scan the league for roughly-even, win-win 1-for-1 trades that upgrade
-    the user's lineup. No prompt needed — deterministic and self-ranked."""
+    """Auto-scan the league for roughly-even, win-win trades that upgrade the
+    user's lineup. No prompt needed — deterministic and self-ranked. Optional
+    ``target`` narrows to packages that bring back that position; ``shed``
+    narrows to packages that give that position away."""
     conn = await _owned_connection(connection_id, user, db)
     if not conn.team_id:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "This league connection isn't linked to one of your teams yet.",
         )
-    trades = await find_trades(db, conn)
+    trades = await find_trades(
+        db, conn, target=_valid_position(target), shed=_valid_position(shed)
+    )
     return TradeFinderResponse(trades=trades)

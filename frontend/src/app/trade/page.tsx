@@ -225,6 +225,8 @@ export default function TradePage() {
   const [finding, setFinding] = useState(false);
   const [finderRan, setFinderRan] = useState(false);
   const [finderError, setFinderError] = useState<string | null>(null);
+  const [target, setTarget] = useState("");
+  const [shed, setShed] = useState("");
 
   const allIds = [...give, ...receive].map((p) => p.id);
 
@@ -234,8 +236,11 @@ export default function TradePage() {
     setFinderError(null);
     setFinderRan(false);
     try {
+      const params = new URLSearchParams({ connection_id: league.id });
+      if (target) params.set("target", target);
+      if (shed) params.set("shed", shed);
       const resp = await api<{ trades: FinderTrade[] }>(
-        `/api/trade/finder?connection_id=${encodeURIComponent(league.id)}`,
+        `/api/trade/finder?${params.toString()}`,
       );
       setFinderTrades(resp.trades);
       setFinderRan(true);
@@ -301,13 +306,41 @@ export default function TradePage() {
                 lineup — no typing required.
               </p>
             </div>
-            <button
-              onClick={findTrades}
-              disabled={finding || !league}
-              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-500 disabled:opacity-50"
-            >
-              {finding ? "Scanning league…" : "Find trades for me"}
-            </button>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex flex-col text-xs text-gray-500">
+                Target (get)
+                <select
+                  value={target}
+                  onChange={(e) => setTarget(e.target.value)}
+                  className="mt-1 rounded-lg border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-700"
+                >
+                  <option value="">Any</option>
+                  {["QB", "RB", "WR", "TE"].map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col text-xs text-gray-500">
+                Trade away
+                <select
+                  value={shed}
+                  onChange={(e) => setShed(e.target.value)}
+                  className="mt-1 rounded-lg border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-700"
+                >
+                  <option value="">Any</option>
+                  {["QB", "RB", "WR", "TE"].map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                onClick={findTrades}
+                disabled={finding || !league}
+                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-500 disabled:opacity-50"
+              >
+                {finding ? "Scanning league…" : "Find trades for me"}
+              </button>
+            </div>
           </div>
 
           {finderError && (
@@ -315,8 +348,9 @@ export default function TradePage() {
           )}
           {finderRan && !finding && finderTrades.length === 0 && (
             <p className="mt-3 text-sm text-gray-500">
-              No clean win-win trades right now — your roster looks balanced, or
-              no partner lines up on value. Try the manual analyzer below.
+              {target || shed
+                ? "No fair win-win deals match those positions. Try widening the filters or setting them to Any."
+                : "No clean win-win trades right now — your roster looks balanced, or no partner lines up on value. Try the manual analyzer below."}
             </p>
           )}
 

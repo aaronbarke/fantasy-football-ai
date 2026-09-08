@@ -143,6 +143,17 @@ def test_finder_surfaces_one_for_two_depth():
     assert one_for_two[0]["give"][0]["id"] == "wr1"
 
 
+def test_finder_position_filters():
+    # target=RB → every candidate must bring back an RB.
+    for c in rank_trades(_MY, _THEIR, SLOTS, _PARTNER, target="RB"):
+        assert any(p["position"] == "RB" for p in c["receive"])
+    # shed=WR → every candidate must give a WR away.
+    for c in rank_trades(_MY, _THEIR, SLOTS, _PARTNER, shed="WR"):
+        assert any(p["position"] == "WR" for p in c["give"])
+    # target a position nobody offers → nothing.
+    assert rank_trades(_MY, _THEIR, SLOTS, _PARTNER, target="QB") == []
+
+
 def test_finder_skips_lopsided_and_non_upgrades():
     # A roster of only low-value scrubs: nothing is both fair AND an upgrade.
     scrubs = [
