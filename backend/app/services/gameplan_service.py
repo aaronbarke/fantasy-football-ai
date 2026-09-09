@@ -296,48 +296,59 @@ async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:
     cards = await _player_cards(db, all_ids, projections)
     projectable = [c for c in cards if c["projected"] is not None]
 
-    slots = _lineup_slots(conn)
-    lineup, bench = optimize_lineup(slots, projectable)
+    # The full league lineup in its configured order, K/DEF included, so the
+    # game plan mirrors the matchup preview and the actual roster settings.
+    all_slots = _all_lineup_slots(conn)
+    lineup = _display_lineup(all_slots, cards)
+    used_ids = {r["player"]["id"] for r in lineup if r["player"]}
+    bench = sorted(
+        (c for c in cards if c["id"] not in used_ids),
+        key=lambda c: -(c.get("projected") or 0),
+    )
 
-    # Swaps: optimal starters who are currently on the user's bench
+    # Swaps: optimal starters currently on the user's bench. Skill positions
+    # only — K/DEF are one-deep, so a start/sit call there is just noise.
     current_starters = set(roster.starters or [])
     swaps = []
     if current_starters:
-        optimal_ids = {s["player"]["id"] for s in lineup if s["player"]}
+        optimal_ids = used_ids
         for s in lineup:
             p = s["player"]
-            if p and p["id"] not in current_starters:
-                # Find the currently-started player at this position being displaced
-                displaced = next(
-                    (
-                        c
-                        for c in projectable
-                        if c["id"] in current_starters
-                        and c["id"] not in optimal_ids
-                        and c["position"] == p["position"]
-                    ),
-                    None,
-                )
-                # Recommend the higher projection even by a hair; for near
-                # toss-ups flag it close and name the contextual tiebreaker.
-                gain = None
-                close = False
-                reason = None
-                if displaced is not None:
-                    gain = round((p.get("projected") or 0) - (displaced.get("projected") or 0), 1)
-                    close = gain < CLOSE_MARGIN
-                    if close:
-                        reason = _edge_reason(p, displaced)
-                swaps.append(
-                    {
-                        "start": p,
-                        "sit": displaced,
-                        "slot": s["slot"],
-                        "gain": gain,
-                        "close": close,
-                        "reason": reason,
-                    }
-                )
+            if not p or p["id"] in current_starters:
+                continue
+            if (p.get("position") or "").upper() in {"K", "DEF", "DST", "D/ST"}:
+                continue
+            # Find the currently-started player at this position being displaced
+            displaced = next(
+                (
+                    c
+                    for c in projectable
+                    if c["id"] in current_starters
+                    and c["id"] not in optimal_ids
+                    and c["position"] == p["position"]
+                ),
+                None,
+            )
+            # Recommend the higher projection even by a hair; for near
+            # toss-ups flag it close and name the contextual tiebreaker.
+            gain = None
+            close = False
+            reason = None
+            if displaced is not None:
+                gain = round((p.get("projected") or 0) - (displaced.get("projected") or 0), 1)
+                close = gain < CLOSE_MARGIN
+                if close:
+                    reason = _edge_reason(p, displaced)
+            swaps.append(
+                {
+                    "start": p,
+                    "sit": displaced,
+                    "slot": s["slot"],
+                    "gain": gain,
+                    "close": close,
+                    "reason": reason,
+                }
+            )
 
     my_total, my_var = _team_totals(lineup, projections)
 
@@ -367,9 +378,7 @@ async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:
         if opp_roster and opp_roster.players:
             opp_proj = await compute_projections(db, list(opp_roster.players), conn.season)
             opp_cards = await _player_cards(db, list(opp_roster.players), opp_proj)
-            opp_lineup, _ = optimize_lineup(
-                slots, [c for c in opp_cards if c["projected"] is not None]
-            )
+            opp_lineup = _display_lineup(all_slots, opp_cards)
             opp_total, opp_var = _team_totals(opp_lineup, opp_proj)
             opponent = {
                 "name": opp_roster.owner_name,
