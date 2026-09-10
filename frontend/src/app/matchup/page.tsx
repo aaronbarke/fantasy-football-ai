@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
@@ -9,7 +10,7 @@ import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import PlayerAvatar from "@/components/PlayerAvatar";
 import { positionColor } from "@/lib/utils";
-import { Sparkles } from "lucide-react";
+import { RefreshCw, Sparkles } from "lucide-react";
 
 interface MPlayer {
   id: string;
@@ -30,10 +31,14 @@ interface MTeam {
   owner_name: string | null;
   record: string;
   projected_total: number;
+  current_points?: number | null;
+  expected_total?: number;
+  bench?: MPlayer[];
 }
 interface MatchupPreview {
   status: string;
   week?: number;
+  live?: boolean;
   win_probability?: number;
   user?: MTeam;
   opponent?: MTeam;
@@ -103,8 +108,46 @@ function PlayerSide({
   );
 }
 
+function BenchColumn({
+  title,
+  players,
+}: {
+  title: string;
+  players?: MPlayer[];
+}) {
+  return (
+    <div className="rounded-xl border border-gray-200/70 bg-white p-3 dark:border-gray-800/70">
+      <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-gray-300 dark:text-gray-600">
+        {title}
+      </p>
+      {(players ?? []).length === 0 ? (
+        <p className="text-xs text-gray-400">No bench players.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {players!.map((p) => (
+            <li key={p.id} className="flex items-center gap-2">
+              <span
+                className={`flex h-6 w-8 shrink-0 items-center justify-center rounded text-[9px] font-bold text-white ${positionColor(p.position)}`}
+              >
+                {p.position}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-sm text-gray-800 dark:text-gray-200">
+                {p.name}
+              </span>
+              <span className="shrink-0 text-sm font-semibold tabular-nums text-gray-400">
+                {p.projected != null ? p.projected.toFixed(1) : "—"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function MatchupPage() {
   const { league } = useLeague();
+  const [refreshing, setRefreshing] = useState(false);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["matchup-preview", league?.id],
@@ -113,6 +156,19 @@ export default function MatchupPage() {
     enabled: !!league,
     retry: false,
   });
+
+  // Pull fresh rosters, starters and live scores from the platform, then
+  // recompute the matchup (and its live win probability).
+  async function refresh() {
+    if (!league || refreshing) return;
+    setRefreshing(true);
+    try {
+      await api(`/api/leagues/${league.id}/sync`, { method: "POST" });
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const ready =
     data?.status === "ok" && data.user && data.opponent && data.rows;
@@ -140,12 +196,22 @@ export default function MatchupPage() {
               Two rosters. One matchup. See how the projected lineups compare.
             </p>
           </div>
-          <Link
-            href={`/chat?q=${encodeURIComponent("Break down my matchup this week")}`}
-            className="flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
-          >
-            <Sparkles className="h-4 w-4" /> Get a matchup breakdown
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={refresh}
+              disabled={refreshing || !league}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+            <Link
+              href={`/chat?q=${encodeURIComponent("Break down my matchup this week")}`}
+              className="flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
+            >
+              <Sparkles className="h-4 w-4" /> Get a matchup breakdown
+            </Link>
+          </div>
         </div>
 
         {isLoading && <LoadingState label="Comparing the lineups…" />}
@@ -169,19 +235,35 @@ export default function MatchupPage() {
                     You · {data.user.record}
                   </p>
                   <p className="mt-1 text-4xl font-extrabold tabular-nums text-gray-900 dark:text-gray-100">
-                    {data.user.projected_total.toFixed(1)}
+                    {(data.live
+                      ? data.user.current_points ?? 0
+                      : data.user.projected_total
+                    ).toFixed(1)}
                   </p>
+                  {data.live && (
+                    <p className="text-xs text-gray-400">
+                      proj {data.user.expected_total?.toFixed(1)}
+                    </p>
+                  )}
                 </div>
                 <span className="pb-2 text-xs font-bold text-gray-300 dark:text-gray-600">
-                  PROJECTED
+                  {data.live ? "LIVE" : "PROJECTED"}
                 </span>
                 <div className="text-right">
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
                     {oppName} · {data.opponent.record}
                   </p>
                   <p className="mt-1 text-4xl font-extrabold tabular-nums text-gray-900 dark:text-gray-100">
-                    {data.opponent.projected_total.toFixed(1)}
+                    {(data.live
+                      ? data.opponent.current_points ?? 0
+                      : data.opponent.projected_total
+                    ).toFixed(1)}
                   </p>
+                  {data.live && (
+                    <p className="text-xs text-gray-400">
+                      proj {data.opponent.expected_total?.toFixed(1)}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -203,8 +285,9 @@ export default function MatchupPage() {
                     />
                   </div>
                   <p className="mt-2 text-center text-xs text-gray-400">
-                    Win probability from projected scores &amp; each
-                    player&apos;s volatility
+                    {data.live
+                      ? "Live win probability — current score plus each team's projected rest of week"
+                      : "Win probability from projected scores & each player's volatility"}
                   </p>
                 </div>
               )}
@@ -236,6 +319,18 @@ export default function MatchupPage() {
                 );
               })}
             </div>
+
+            {/* Benches */}
+            {((data.user.bench?.length ?? 0) > 0 ||
+              (data.opponent.bench?.length ?? 0) > 0) && (
+              <div className="mt-6 grid grid-cols-2 gap-4">
+                <BenchColumn title="Your bench" players={data.user.bench} />
+                <BenchColumn
+                  title={`${oppName}'s bench`}
+                  players={data.opponent.bench}
+                />
+              </div>
+            )}
           </>
         )}
       </main>
