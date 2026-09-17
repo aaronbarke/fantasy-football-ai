@@ -6,7 +6,7 @@ win probability against this week's opponent, and the matchup/Vegas context
 behind each call. The AI narrative endpoint turns it into a coach's brief.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -247,6 +247,30 @@ async def _matchup_team(
     }
 
 
+async def _current_nfl_week(db: AsyncSession, season: int, now: datetime) -> int | None:
+    """The active NFL week from the schedule: the earliest week whose games
+    aren't all finished (a game is done ~4h after kickoff). Preseason → the
+    first week; after the finale → the last. ``None`` if no schedule is loaded.
+
+    Platform-agnostic — ESPN syncs the whole schedule up front and Sleeper only
+    the current week, so we can't infer the week from which matchups exist."""
+    rows = (
+        await db.execute(
+            select(NflSchedule.week, NflSchedule.game_time).where(
+                NflSchedule.season == season, NflSchedule.game_time.is_not(None)
+            )
+        )
+    ).all()
+    if not rows:
+        return None
+    last_kick: dict[int, datetime] = {}
+    for week, game_time in rows:
+        if week not in last_kick or game_time > last_kick[week]:
+            last_kick[week] = game_time
+    unfinished = [w for w, kick in last_kick.items() if kick + timedelta(hours=4) > now]
+    return min(unfinished) if unfinished else max(last_kick)
+
+
 async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dict:
     """Head-to-head scouting report: both lineups aligned slot by slot (the
     league's real lineup, K/DEF included), current + projected scores, each
@@ -265,10 +289,22 @@ async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dic
     mine = [x for x in matchups if conn.team_id in (x.team_a_id, x.team_b_id)]
     if not mine:
         return {"status": "no_matchup"}
-    # The active week is the latest one that has started scoring (live/most
-    # recent); before any scores (preseason) it's the earliest upcoming week.
-    scored = [x for x in mine if (x.team_a_points or x.team_b_points)]
-    m = max(scored, key=lambda x: x.week) if scored else min(mine, key=lambda x: x.week)
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    by_week = {x.week: x for x in mine}
+    current_week = await _current_nfl_week(db, conn.season, now)
+    if current_week is not None and current_week in by_week:
+        m = by_week[current_week]
+    elif current_week is not None:
+        # Current week not synced yet: show the nearest week we do have at or
+        # below it (Refresh will pull the current one), else the earliest.
+        at_or_below = [w for w in by_week if w <= current_week]
+        m = by_week[max(at_or_below)] if at_or_below else by_week[min(by_week)]
+    else:
+        # No schedule loaded: fall back to the latest week we have. Sleeper only
+        # syncs the current week, so that's usually right; ESPN carries the full
+        # schedule (and game times), so this branch rarely triggers for it.
+        m = max(mine, key=lambda x: x.week)
 
     async def _roster(team_id: str | None) -> Roster | None:
         if not team_id:
@@ -304,7 +340,6 @@ async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dic
         if g.game_time:
             kickoffs[(g.home_team or "").upper()] = g.game_time
             kickoffs[(g.away_team or "").upper()] = g.game_time
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
     live = bool((user_points or 0) or (opp_points or 0))
 
     all_slots = _all_lineup_slots(conn)
