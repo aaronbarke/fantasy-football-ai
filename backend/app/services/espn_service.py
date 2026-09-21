@@ -18,6 +18,25 @@ SLOT_MAP = {
 # ESPN position IDs on player objects
 POSITION_MAP = {1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "DEF"}
 
+# ESPN proTeamId → team code (Sleeper convention, which is how we key team
+# defenses). Team D/ST aren't in the player id crosswalk, so we resolve them by
+# their pro team instead.
+PRO_TEAM_MAP = {
+    1: "ATL", 2: "BUF", 3: "CHI", 4: "CIN", 5: "CLE", 6: "DAL", 7: "DEN",
+    8: "DET", 9: "GB", 10: "TEN", 11: "IND", 12: "KC", 13: "LV", 14: "LAR",
+    15: "MIA", 16: "MIN", 17: "NE", 18: "NO", 19: "NYG", 20: "NYJ", 21: "PHI",
+    22: "ARI", 23: "PIT", 24: "LAC", 25: "SF", 26: "SEA", 27: "TB", 28: "WAS",
+    29: "CAR", 30: "JAX", 33: "BAL", 34: "HOU",
+}
+
+
+def espn_defense_code(entry: dict) -> str | None:
+    """Team-code id for a D/ST roster entry (our defense Player id), else None."""
+    player = (entry.get("playerPoolEntry") or {}).get("player") or {}
+    if player.get("defaultPositionId") != 16:
+        return None
+    return PRO_TEAM_MAP.get(player.get("proTeamId"))
+
 
 class ESPNClient:
     def __init__(
@@ -96,6 +115,22 @@ class ESPNClient:
             if slot is not None and SLOT_MAP.get(slot) not in ("BN", "IR"):
                 starter_ids.append(pid)
         return all_ids, starter_ids
+
+    @staticmethod
+    def parse_defenses(team: dict) -> tuple[list[str], list[str]]:
+        """(all D/ST team-code ids, started D/ST team-code ids) for a team blob.
+        Defenses map by pro team, not the player crosswalk."""
+        all_def: list[str] = []
+        starter_def: list[str] = []
+        for entry in (team.get("roster") or {}).get("entries", []):
+            code = espn_defense_code(entry)
+            if not code:
+                continue
+            all_def.append(code)
+            slot = entry.get("lineupSlotId")
+            if slot is not None and SLOT_MAP.get(slot) not in ("BN", "IR"):
+                starter_def.append(code)
+        return all_def, starter_def
 
 
 def roster_positions_from_espn(settings_blob: dict) -> list[str] | None:

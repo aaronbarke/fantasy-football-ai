@@ -18,6 +18,7 @@ from app.models import (
 )
 from app.services.espn_service import (
     ESPNClient,
+    espn_defense_code,
     roster_positions_from_espn,
     scoring_type_from_espn,
 )
@@ -356,7 +357,8 @@ def _espn_player_points(side: dict, espn_map: dict[str, str]) -> dict[str, float
     for e in roster.get("entries") or []:
         espn_pid = str(e.get("playerId") or (e.get("playerPoolEntry") or {}).get("id") or "")
         pts = (e.get("playerPoolEntry") or {}).get("appliedStatTotal")
-        sid = espn_map.get(espn_pid)
+        # Team D/ST map by pro team, not the crosswalk.
+        sid = espn_defense_code(e) or espn_map.get(espn_pid)
         if sid and pts is not None:
             out[sid] = float(pts)
     return out
@@ -399,8 +401,10 @@ async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
     for team in data.get("teams", []):
         team_id = str(team["id"])
         espn_ids, espn_starter_ids = ESPNClient.parse_roster_entries(team)
-        players = [espn_map[e] for e in espn_ids if e in espn_map]
-        starters = [espn_map[e] for e in espn_starter_ids if e in espn_map]
+        def_ids, def_starters = ESPNClient.parse_defenses(team)
+        # Team D/ST resolve by pro team (team code), not the player crosswalk.
+        players = [espn_map[e] for e in espn_ids if e in espn_map] + def_ids
+        starters = [espn_map[e] for e in espn_starter_ids if e in espn_map] + def_starters
 
         roster = (
             await db.execute(
