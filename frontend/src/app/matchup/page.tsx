@@ -432,8 +432,14 @@ export default function MatchupPage() {
                     key={i}
                     className="rounded-xl border border-gray-200/70 bg-white p-3 dark:border-gray-800/70"
                   >
-                    <div className="mb-1.5 text-center text-[10px] font-bold uppercase tracking-widest text-gray-300 dark:text-gray-600">
-                      {r.slot}
+                    <div className="mb-1.5 text-center text-[10px] font-bold uppercase tracking-widest">
+                      {r.slot.includes("FLEX") ? (
+                        <span className="bg-gradient-to-r from-blue-500 via-green-500 to-orange-500 bg-clip-text text-transparent">
+                          FLEX
+                        </span>
+                      ) : (
+                        <span className="text-gray-300 dark:text-gray-600">{r.slot}</span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <PlayerSide p={r.user} win={userWin} align="left" live={live} />

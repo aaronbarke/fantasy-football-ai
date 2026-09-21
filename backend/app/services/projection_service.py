@@ -18,7 +18,7 @@ narrow one. Confidence reflects sample size and volatility.
 
 import math
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -274,7 +274,18 @@ async def compute_projections(
                 .order_by(NflSchedule.week.asc())
             )
         ).scalars().all()
+        # "Next" game = the current NFL week onward, not Week 1. The active week
+        # is the earliest whose games aren't all finished (~4h past kickoff).
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        last_kick: dict[int, datetime] = {}
         for g in games:
+            if g.game_time and (g.week not in last_kick or g.game_time > last_kick[g.week]):
+                last_kick[g.week] = g.game_time
+        unfinished = [w for w, k in last_kick.items() if k + timedelta(hours=4) > now]
+        current_week = min(unfinished) if unfinished else (max(last_kick) if last_kick else None)
+        for g in games:
+            if current_week is not None and g.week < current_week:
+                continue  # skip past weeks so we don't show a stale opponent
             for team, opp, home in (
                 (g.home_team, g.away_team, True),
                 (g.away_team, g.home_team, False),

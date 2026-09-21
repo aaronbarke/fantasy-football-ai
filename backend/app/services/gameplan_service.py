@@ -154,11 +154,21 @@ def _team_totals(lineup: list[dict], projections: dict[str, dict]) -> tuple[floa
     return total, variance
 
 
+# Canonical display order: skill positions, then FLEX, then DEF, and K last.
+_SLOT_DISPLAY_ORDER = {
+    "QB": 0, "RB": 1, "WR": 2, "TE": 3,
+    "FLEX": 4, "WRRB_FLEX": 4, "REC_FLEX": 4, "SUPER_FLEX": 4, "OP": 4,
+    "DEF": 5, "K": 6,
+}
+
+
 def _all_lineup_slots(conn: LeagueConnection) -> list[str]:
-    """The league's full starting lineup in order, including K/DEF (normalized)."""
+    """The league's full starting lineup, K/DEF included and normalized, in a
+    consistent display order (skill → FLEX → DEF → K)."""
     raw = [s.upper() for s in (conn.roster_positions or []) if s and s.upper() not in NON_LINEUP]
     slots = ["DEF" if s in {"D/ST", "DST"} else s for s in raw]
-    return slots or [*DEFAULT_LINEUP, "K", "DEF"]
+    slots = slots or [*DEFAULT_LINEUP, "K", "DEF"]
+    return sorted(slots, key=lambda s: _SLOT_DISPLAY_ORDER.get(s, 4))
 
 
 def _display_lineup(all_slots: list[str], cards: list[dict]) -> list[dict]:
