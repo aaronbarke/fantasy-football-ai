@@ -3,6 +3,7 @@ from app.models.depth import DepthChartEntry
 from app.models.draft import PlayerDraftProfile
 from app.models.game import GameCondition
 from app.models.league import LeagueConnection
+from app.models.live_score import LivePlayerScore
 from app.models.matchup import Matchup
 from app.models.mock_draft import MockDraft, MockDraftPick
 from app.models.news import PlayerNews
@@ -23,6 +24,7 @@ __all__ = [
     "AvailablePlayer",
     "Matchup",
     "MatchupOdds",
+    "LivePlayerScore",
     "GameCondition",
     "ChatMessage",
     "NflSchedule",

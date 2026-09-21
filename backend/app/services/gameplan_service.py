@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     LeagueConnection,
+    LivePlayerScore,
     Matchup,
     MatchupOdds,
     NflSchedule,
@@ -240,6 +241,7 @@ async def _matchup_team(
     now: datetime,
     live: bool,
     optimal: bool,
+    live_scores: dict[str, float],
 ) -> dict:
     """Full display lineup, bench (with projections), and both a pre-game
     projected total and a LIVE expected total for one roster.
@@ -256,6 +258,8 @@ async def _matchup_team(
     projection. K/DEF carry the league-average baseline, no variance."""
     proj = await compute_projections(db, list(roster.players), conn.season)
     cards = await _player_cards(db, list(roster.players), proj)
+    for c in cards:
+        c["actual_points"] = live_scores.get(c["id"])
     if optimal or not (roster.starters or []):
         rows = _display_lineup(all_slots, cards)
     else:
@@ -400,11 +404,20 @@ async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dic
             kickoffs[(g.away_team or "").upper()] = g.game_time
     live = bool((user_points or 0) or (opp_points or 0))
 
+    live_score_rows = (
+        await db.execute(
+            select(LivePlayerScore.player_id, LivePlayerScore.points).where(
+                LivePlayerScore.connection_id == conn.id, LivePlayerScore.week == m.week
+            )
+        )
+    ).all()
+    live_scores = {pid: float(pts) for pid, pts in live_score_rows}
+
     all_slots = _all_lineup_slots(conn)
     # Your side: the optimal lineup (what you should start). Opponent: what they
     # actually set — you're stuck playing whoever they benched or started.
-    user = await _matchup_team(db, conn, all_slots, user_roster, user_points, kickoffs, now, live, True)
-    opp = await _matchup_team(db, conn, all_slots, opp_roster, opp_points, kickoffs, now, live, False)
+    user = await _matchup_team(db, conn, all_slots, user_roster, user_points, kickoffs, now, live, True, live_scores)
+    opp = await _matchup_team(db, conn, all_slots, opp_roster, opp_points, kickoffs, now, live, False, live_scores)
 
     # Both lineups are built from the same slot list, so they align index-for-index
     rows = []

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.database import Base
 from app.models import (
     LeagueConnection,
+    LivePlayerScore,
     Matchup,
     MatchupOdds,
     NflSchedule,
@@ -98,6 +99,20 @@ async def test_snapshots_recorded_only_when_odds_move(db: AsyncSession):
     await db.commit()
     await build_matchup_preview(db, conn)
     assert await _count(db, conn) == 2
+
+
+async def test_actual_points_attached_to_cards(db: AsyncSession):
+    conn = await _live_matchup(db)
+    db.add(LivePlayerScore(connection_id=conn.id, week=2, player_id="t1_qb", points=27.5))
+    await db.commit()
+    preview = await build_matchup_preview(db, conn)
+    got = None
+    for r in preview["rows"]:
+        for side in ("user", "opponent"):
+            pl = r[side]
+            if pl and pl["id"] == "t1_qb":
+                got = pl["actual_points"]
+    assert got == 27.5
 
 
 async def test_no_snapshot_when_not_live(db: AsyncSession):

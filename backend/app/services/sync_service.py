@@ -10,6 +10,7 @@ from app.models import (
     AvailablePlayer,
     DepthChartEntry,
     LeagueConnection,
+    LivePlayerScore,
     Matchup,
     Player,
     PlayerStatsWeekly,
@@ -220,9 +221,27 @@ async def sync_sleeper_league(db: AsyncSession, conn: LeagueConnection) -> None:
     logger.info("Synced sleeper league %s (week %d)", conn.league_id, week)
 
 
+async def _replace_live_scores(
+    db: AsyncSession, conn: LeagueConnection, week: int, points_by_player: dict[str, float]
+) -> None:
+    """Overwrite the per-player live scores for one week."""
+    await db.execute(
+        delete(LivePlayerScore).where(
+            LivePlayerScore.connection_id == conn.id, LivePlayerScore.week == week
+        )
+    )
+    for pid, pts in points_by_player.items():
+        if pid and pts is not None:
+            db.add(
+                LivePlayerScore(
+                    connection_id=conn.id, week=week, player_id=str(pid), points=float(pts)
+                )
+            )
+
+
 async def sync_live_scores(db: AsyncSession, conn: LeagueConnection) -> None:
-    """Refresh only the current matchup's live points — cheap enough to poll
-    every minute during games (no player pool, rosters, or waivers)."""
+    """Refresh only the current matchup's live points — team totals AND
+    per-player scores — cheap enough to poll every minute during games."""
     if conn.platform == "sleeper":
         client = SleeperClient()
         try:
@@ -232,7 +251,10 @@ async def sync_live_scores(db: AsyncSession, conn: LeagueConnection) -> None:
         finally:
             await client.close()
         by_matchup: dict[int, list[dict]] = {}
+        player_points: dict[str, float] = {}
         for m in matchups:
+            for pid, pts in (m.get("players_points") or {}).items():
+                player_points[str(pid)] = pts
             if m.get("matchup_id") is not None:
                 by_matchup.setdefault(m["matchup_id"], []).append(m)
         await db.execute(
@@ -250,6 +272,7 @@ async def sync_live_scores(db: AsyncSession, conn: LeagueConnection) -> None:
                     team_b_points=b.get("points") if b else None,
                 )
             )
+        await _replace_live_scores(db, conn, week, player_points)
     elif conn.platform == "espn":
         creds = conn.credentials or {}
         client = ESPNClient(
@@ -260,7 +283,10 @@ async def sync_live_scores(db: AsyncSession, conn: LeagueConnection) -> None:
             schedule_data = await client.get_matchups()
         finally:
             await client.close()
+        espn_map = await espn_to_sleeper_map(db)
+        current = (schedule_data or {}).get("scoringPeriodId")
         await db.execute(delete(Matchup).where(Matchup.connection_id == conn.id))
+        player_points = {}
         for entry in (schedule_data or {}).get("schedule") or []:
             week = entry.get("matchupPeriodId")
             away = entry.get("away") or {}
@@ -274,6 +300,13 @@ async def sync_live_scores(db: AsyncSession, conn: LeagueConnection) -> None:
                     team_a_points=_espn_points(away), team_b_points=_espn_points(home),
                 )
             )
+            # Per-player live points only make sense for the current period,
+            # whose roster carries live applied totals.
+            if current is not None and int(week) == int(current):
+                for side in (away, home):
+                    player_points.update(_espn_player_points(side, espn_map))
+        if current is not None:
+            await _replace_live_scores(db, conn, int(current), player_points)
     else:
         return
     await db.commit()
@@ -310,6 +343,23 @@ def _espn_points(side: dict) -> float:
         return round(total, 2)
 
     return float(side.get("totalPoints") or 0)
+
+
+def _espn_player_points(side: dict, espn_map: dict[str, str]) -> dict[str, float]:
+    """{our player_id: live points} for one side's live roster."""
+    out: dict[str, float] = {}
+    roster = (
+        side.get("rosterForCurrentScoringPeriod")
+        or side.get("rosterForMatchupPeriod")
+        or {}
+    )
+    for e in roster.get("entries") or []:
+        espn_pid = str(e.get("playerId") or (e.get("playerPoolEntry") or {}).get("id") or "")
+        pts = (e.get("playerPoolEntry") or {}).get("appliedStatTotal")
+        sid = espn_map.get(espn_pid)
+        if sid and pts is not None:
+            out[sid] = float(pts)
+    return out
 
 
 async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
