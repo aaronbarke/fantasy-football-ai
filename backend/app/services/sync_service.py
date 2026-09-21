@@ -279,12 +279,36 @@ async def sync_live_scores(db: AsyncSession, conn: LeagueConnection) -> None:
     await db.commit()
 
 
+_ESPN_NON_STARTER_SLOTS = {20, 21}  # bench, IR
+
+
 def _espn_points(side: dict) -> float:
-    """Live in-progress points if the matchup is being played, else the final
-    total. ESPN exposes live scoring under totalPointsLive."""
+    """Live points for one side of an ESPN matchup.
+
+    Prefer ESPN's own live total (totalPointsLive). If it isn't present, sum the
+    starters' already-applied points from the live roster — ESPN has scored each
+    player for the period, so summing appliedStatTotal matches ESPN exactly and
+    updates during games. Fall back to the final total for completed weeks."""
     live = side.get("totalPointsLive")
     if live is not None:
         return float(live)
+
+    roster = (
+        side.get("rosterForCurrentScoringPeriod")
+        or side.get("rosterForMatchupPeriod")
+        or {}
+    )
+    total, found = 0.0, False
+    for e in roster.get("entries") or []:
+        if e.get("lineupSlotId") in _ESPN_NON_STARTER_SLOTS:
+            continue
+        pts = (e.get("playerPoolEntry") or {}).get("appliedStatTotal")
+        if pts is not None:
+            total += float(pts)
+            found = True
+    if found:
+        return round(total, 2)
+
     return float(side.get("totalPoints") or 0)
 
 
