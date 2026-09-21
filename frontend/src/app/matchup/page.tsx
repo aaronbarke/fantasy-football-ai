@@ -1,7 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { EmptyState, LoadingState, ErrorState } from "@/components/PageState";
@@ -44,6 +53,18 @@ interface MatchupPreview {
   opponent?: MTeam;
   rows?: MRow[];
 }
+interface OddsPoint {
+  t: string | null;
+  win_probability: number;
+  user_points: number | null;
+  opp_points: number | null;
+}
+interface OddsHistory {
+  week: number | null;
+  points: OddsPoint[];
+}
+
+const POLL_MS = 45_000;
 
 function PlayerSide({
   p,
@@ -108,6 +129,54 @@ function PlayerSide({
   );
 }
 
+function fmtTime(t: string | null): string {
+  if (!t) return "";
+  const norm = /[Z]|[+-]\d\d:?\d\d$/.test(t) ? t : `${t}Z`;
+  const d = new Date(norm);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function OddsChart({ points }: { points: OddsPoint[] }) {
+  const data = points.map((p) => ({
+    time: fmtTime(p.t),
+    you: Math.round(p.win_probability * 100),
+  }));
+  return (
+    <div className="mt-6">
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+        Your win probability today
+      </p>
+      <ResponsiveContainer width="100%" height={150}>
+        <LineChart data={data} margin={{ top: 6, right: 10, bottom: 0, left: -18 }}>
+          <ReferenceLine y={50} stroke="#9ca3af" strokeDasharray="3 3" />
+          <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#9ca3af" }} stroke="#9ca3af" minTickGap={28} />
+          <YAxis
+            domain={[0, 100]}
+            ticks={[0, 25, 50, 75, 100]}
+            tick={{ fontSize: 10, fill: "#9ca3af" }}
+            stroke="#9ca3af"
+            tickFormatter={(v) => `${v}%`}
+          />
+          <Tooltip
+            formatter={(v: number | string) => [`${v}% you`, "Win prob"]}
+            contentStyle={{ fontSize: 12, borderRadius: 8 }}
+          />
+          <Line
+            type="monotone"
+            dataKey="you"
+            stroke="#16a34a"
+            strokeWidth={2}
+            dot={false}
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 function BenchColumn({
   title,
   players,
@@ -147,6 +216,7 @@ function BenchColumn({
 
 export default function MatchupPage() {
   const { league } = useLeague();
+  const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -157,18 +227,42 @@ export default function MatchupPage() {
     retry: false,
   });
 
-  // Pull fresh rosters, starters and live scores from the platform, then
-  // recompute the matchup (and its live win probability).
+  const live = !!data?.live;
+
+  const { data: odds } = useQuery({
+    queryKey: ["matchup-odds", league?.id],
+    queryFn: () =>
+      api<OddsHistory>(`/api/leagues/${league!.id}/matchup/odds-history`),
+    enabled: !!league && live,
+    retry: false,
+  });
+
+  // Pull the current matchup's live points, recompute the odds, and update the
+  // scoreboard + chart in place.
   async function refresh() {
     if (!league || refreshing) return;
     setRefreshing(true);
     try {
-      await api(`/api/leagues/${league.id}/sync`, { method: "POST" });
-      await refetch();
+      const fresh = await api<MatchupPreview>(
+        `/api/leagues/${league.id}/matchup/refresh`,
+        { method: "POST" },
+      );
+      queryClient.setQueryData(["matchup-preview", league.id], fresh);
+      await queryClient.invalidateQueries({
+        queryKey: ["matchup-odds", league.id],
+      });
     } finally {
       setRefreshing(false);
     }
   }
+
+  // While the matchup is live, auto-refresh the score/odds on a gentle poll.
+  useEffect(() => {
+    if (!league || !live) return;
+    const id = setInterval(() => void refresh(), POLL_MS);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [league?.id, live]);
 
   const ready =
     data?.status === "ok" && data.user && data.opponent && data.rows;
@@ -246,9 +340,16 @@ export default function MatchupPage() {
                     </p>
                   )}
                 </div>
-                <span className="pb-2 text-xs font-bold text-gray-300 dark:text-gray-600">
-                  {data.live ? "LIVE" : "PROJECTED"}
-                </span>
+                {data.live ? (
+                  <span className="flex items-center gap-1.5 pb-2 text-xs font-bold text-red-500">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                    LIVE
+                  </span>
+                ) : (
+                  <span className="pb-2 text-xs font-bold text-gray-300 dark:text-gray-600">
+                    PROJECTED
+                  </span>
+                )}
                 <div className="text-right">
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
                     {oppName} · {data.opponent.record}
@@ -290,6 +391,10 @@ export default function MatchupPage() {
                       : "Win probability from projected scores & each player's volatility"}
                   </p>
                 </div>
+              )}
+
+              {data.live && (odds?.points.length ?? 0) >= 2 && (
+                <OddsChart points={odds!.points} />
               )}
             </div>
 
