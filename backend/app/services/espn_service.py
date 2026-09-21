@@ -58,7 +58,9 @@ class ESPNClient:
         return await self._get(["mRoster", "mTeam", "mSettings"])
 
     async def get_matchups(self) -> dict:
-        return await self._get(["mMatchup"])
+        # mScoreboard/mLiveScoring surface in-progress ("live") points on the
+        # current week; mMatchup alone reports final totals only.
+        return await self._get(["mMatchup", "mScoreboard", "mLiveScoring"])
 
     async def get_draft_detail(self) -> dict:
         """Live draft board. `draftDetail.picks` carries one slot per overall

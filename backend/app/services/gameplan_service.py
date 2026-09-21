@@ -11,7 +11,14 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import LeagueConnection, Matchup, NflSchedule, Player, Roster
+from app.models import (
+    LeagueConnection,
+    Matchup,
+    MatchupOdds,
+    NflSchedule,
+    Player,
+    Roster,
+)
 from app.services.projection_service import compute_projections, win_probability
 
 # Bench/IR-style slots that never take a starter
@@ -365,6 +372,10 @@ async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dic
         opp["expected_total"], opp.pop("_expected_var"),
     )
 
+    # Snapshot the live odds so the page can chart how they moved during games.
+    if live:
+        await _record_odds_snapshot(db, conn, m.week, win_prob, user_points, opp_points)
+
     return {
         "status": "ok",
         "week": m.week,
@@ -374,6 +385,44 @@ async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dic
         "opponent": opp,
         "rows": rows,
     }
+
+
+async def _record_odds_snapshot(
+    db: AsyncSession,
+    conn: LeagueConnection,
+    week: int,
+    win_prob: float,
+    user_points: float | None,
+    opp_points: float | None,
+) -> None:
+    """Append a win-probability point, but only when it actually moved (score or
+    odds changed) — so the timeline is meaningful and writes stay bounded."""
+    last = (
+        await db.execute(
+            select(MatchupOdds)
+            .where(MatchupOdds.connection_id == conn.id, MatchupOdds.week == week)
+            .order_by(MatchupOdds.captured_at.desc(), MatchupOdds.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    up, op = float(user_points or 0), float(opp_points or 0)
+    if (
+        last is not None
+        and round(last.win_probability, 4) == round(win_prob, 4)
+        and float(last.user_points or 0) == up
+        and float(last.opp_points or 0) == op
+    ):
+        return
+    db.add(
+        MatchupOdds(
+            connection_id=conn.id,
+            week=week,
+            win_probability=round(win_prob, 4),
+            user_points=up,
+            opp_points=op,
+        )
+    )
+    await db.commit()
 
 
 async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:

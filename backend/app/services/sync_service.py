@@ -220,6 +220,74 @@ async def sync_sleeper_league(db: AsyncSession, conn: LeagueConnection) -> None:
     logger.info("Synced sleeper league %s (week %d)", conn.league_id, week)
 
 
+async def sync_live_scores(db: AsyncSession, conn: LeagueConnection) -> None:
+    """Refresh only the current matchup's live points — cheap enough to poll
+    every minute during games (no player pool, rosters, or waivers)."""
+    if conn.platform == "sleeper":
+        client = SleeperClient()
+        try:
+            state = await client.get_nfl_state()
+            week = int(state.get("week") or 1)
+            matchups = await client.get_matchups(conn.league_id, week)
+        finally:
+            await client.close()
+        by_matchup: dict[int, list[dict]] = {}
+        for m in matchups:
+            if m.get("matchup_id") is not None:
+                by_matchup.setdefault(m["matchup_id"], []).append(m)
+        await db.execute(
+            delete(Matchup).where(Matchup.connection_id == conn.id, Matchup.week == week)
+        )
+        for pair in by_matchup.values():
+            a = pair[0]
+            b = pair[1] if len(pair) > 1 else {}
+            db.add(
+                Matchup(
+                    connection_id=conn.id, week=week,
+                    team_a_id=str(a.get("roster_id")),
+                    team_b_id=str(b.get("roster_id")) if b else None,
+                    team_a_points=a.get("points"),
+                    team_b_points=b.get("points") if b else None,
+                )
+            )
+    elif conn.platform == "espn":
+        creds = conn.credentials or {}
+        client = ESPNClient(
+            league_id=conn.league_id, season=conn.season,
+            espn_s2=creds.get("espn_s2"), swid=creds.get("swid"),
+        )
+        try:
+            schedule_data = await client.get_matchups()
+        finally:
+            await client.close()
+        await db.execute(delete(Matchup).where(Matchup.connection_id == conn.id))
+        for entry in (schedule_data or {}).get("schedule") or []:
+            week = entry.get("matchupPeriodId")
+            away = entry.get("away") or {}
+            home = entry.get("home") or {}
+            if week is None or away.get("teamId") is None or home.get("teamId") is None:
+                continue
+            db.add(
+                Matchup(
+                    connection_id=conn.id, week=int(week),
+                    team_a_id=str(away["teamId"]), team_b_id=str(home["teamId"]),
+                    team_a_points=_espn_points(away), team_b_points=_espn_points(home),
+                )
+            )
+    else:
+        return
+    await db.commit()
+
+
+def _espn_points(side: dict) -> float:
+    """Live in-progress points if the matchup is being played, else the final
+    total. ESPN exposes live scoring under totalPointsLive."""
+    live = side.get("totalPointsLive")
+    if live is not None:
+        return float(live)
+    return float(side.get("totalPoints") or 0)
+
+
 async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
     creds = conn.credentials or {}
     client = ESPNClient(
@@ -302,8 +370,10 @@ async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
                 week=int(week),
                 team_a_id=str(away_id),
                 team_b_id=str(home_id),
-                team_a_points=away.get("totalPoints") or 0,
-                team_b_points=home.get("totalPoints") or 0,
+                # Prefer live in-progress points on the current week; fall back
+                # to the final total for completed/upcoming weeks.
+                team_a_points=_espn_points(away),
+                team_b_points=_espn_points(home),
             )
         )
 

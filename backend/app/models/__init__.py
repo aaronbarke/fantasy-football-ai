@@ -6,6 +6,7 @@ from app.models.league import LeagueConnection
 from app.models.matchup import Matchup
 from app.models.mock_draft import MockDraft, MockDraftPick
 from app.models.news import PlayerNews
+from app.models.odds import MatchupOdds
 from app.models.player import Player
 from app.models.roster import AvailablePlayer, Roster
 from app.models.schedule import NflSchedule
@@ -21,6 +22,7 @@ __all__ = [
     "Roster",
     "AvailablePlayer",
     "Matchup",
+    "MatchupOdds",
     "GameCondition",
     "ChatMessage",
     "NflSchedule",

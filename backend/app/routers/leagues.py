@@ -10,6 +10,7 @@ from app.models import (
     AvailablePlayer,
     LeagueConnection,
     Matchup,
+    MatchupOdds,
     Player,
     Roster,
     User,
@@ -26,7 +27,7 @@ from app.schemas.league import (
     WaiverPlayer,
 )
 from app.services.sleeper_service import SleeperClient
-from app.services.sync_service import sync_league
+from app.services.sync_service import sync_league, sync_live_scores
 from app.utils.fantasy_math import scoring_type_from_settings
 from app.utils.security import block_demo, get_current_user
 
@@ -380,6 +381,63 @@ async def get_matchup_preview(
 
     conn = await _get_user_connection(db, user, connection_id)
     return await build_matchup_preview(db, conn)
+
+
+@router.post("/{connection_id}/matchup/refresh")
+async def refresh_live_scores(
+    connection_id: str,
+    user: User = Depends(block_demo),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pull just the current matchup's live points (cheap — safe to poll), then
+    return the recomputed preview with updated odds."""
+    from app.services.gameplan_service import build_matchup_preview
+
+    conn = await _get_user_connection(db, user, connection_id)
+    await sync_live_scores(db, conn)
+    return await build_matchup_preview(db, conn)
+
+
+@router.get("/{connection_id}/matchup/odds-history")
+async def get_odds_history(
+    connection_id: str,
+    week: int | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Win-probability timeline for a matchup week (defaults to the week with the
+    most recent snapshot — the one being played)."""
+    conn = await _get_user_connection(db, user, connection_id)
+    if week is None:
+        week = (
+            await db.execute(
+                select(MatchupOdds.week)
+                .where(MatchupOdds.connection_id == conn.id)
+                .order_by(MatchupOdds.captured_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    if week is None:
+        return {"week": None, "points": []}
+    rows = (
+        await db.execute(
+            select(MatchupOdds)
+            .where(MatchupOdds.connection_id == conn.id, MatchupOdds.week == week)
+            .order_by(MatchupOdds.captured_at.asc(), MatchupOdds.id.asc())
+        )
+    ).scalars().all()
+    return {
+        "week": week,
+        "points": [
+            {
+                "t": r.captured_at.isoformat() if r.captured_at else None,
+                "win_probability": r.win_probability,
+                "user_points": r.user_points,
+                "opp_points": r.opp_points,
+            }
+            for r in rows
+        ],
+    }
 
 
 # Fantasy playoffs are the NFL's weeks 15-17 in most leagues.
