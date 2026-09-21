@@ -28,6 +28,7 @@ interface MPlayer {
   team: string | null;
   injury_status?: string | null;
   projected: number | null;
+  actual_points?: number | null;
   confidence?: string | null;
   opponent?: string | null;
 }
@@ -70,10 +71,12 @@ function PlayerSide({
   p,
   win,
   align,
+  live,
 }: {
   p: MPlayer | null;
   win: boolean;
   align: "left" | "right";
+  live: boolean;
 }) {
   const right = align === "right";
   if (!p) {
@@ -118,13 +121,24 @@ function PlayerSide({
           {p.opponent ? ` · vs ${p.opponent}` : ""}
         </p>
       </div>
-      <span
-        className={`ml-auto shrink-0 text-base font-extrabold tabular-nums ${right ? "ml-0 mr-auto" : ""} ${
-          win ? "text-green-600 dark:text-green-400" : "text-gray-400"
-        }`}
-      >
-        {p.projected != null ? p.projected.toFixed(1) : "—"}
-      </span>
+      {(() => {
+        const showActual = live && p.actual_points != null;
+        const big = showActual ? p.actual_points! : p.projected;
+        return (
+          <div className={`ml-auto shrink-0 ${right ? "ml-0 mr-auto text-left" : "text-right"}`}>
+            <div
+              className={`text-base font-extrabold tabular-nums ${
+                win ? "text-green-600 dark:text-green-400" : "text-gray-400"
+              }`}
+            >
+              {big != null ? big.toFixed(1) : "—"}
+            </div>
+            {showActual && p.projected != null && (
+              <div className="text-[10px] text-gray-400">proj {p.projected.toFixed(1)}</div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -256,9 +270,11 @@ export default function MatchupPage() {
     }
   }
 
-  // While the matchup is live, auto-refresh the score/odds on a gentle poll.
+  // While the matchup is live, pull live scores right away and then on a gentle
+  // poll so the score, per-player points, and odds keep updating.
   useEffect(() => {
     if (!league || !live) return;
+    void refresh();
     const id = setInterval(() => void refresh(), POLL_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -401,8 +417,12 @@ export default function MatchupPage() {
             {/* Position battles */}
             <div className="mt-6 space-y-2">
               {data.rows!.map((r, i) => {
-                const u = r.user?.projected ?? -1;
-                const o = r.opponent?.projected ?? -1;
+                const val = (p: MPlayer | null) =>
+                  (live && p?.actual_points != null
+                    ? p.actual_points
+                    : p?.projected) ?? -1;
+                const u = val(r.user);
+                const o = val(r.opponent);
                 const userWin = u > o;
                 const oppWin = o > u;
                 return (
@@ -414,11 +434,11 @@ export default function MatchupPage() {
                       {r.slot}
                     </div>
                     <div className="flex items-center gap-2">
-                      <PlayerSide p={r.user} win={userWin} align="left" />
+                      <PlayerSide p={r.user} win={userWin} align="left" live={live} />
                       <div className="shrink-0 px-1 text-[10px] font-bold text-gray-300 dark:text-gray-700">
                         VS
                       </div>
-                      <PlayerSide p={r.opponent} win={oppWin} align="right" />
+                      <PlayerSide p={r.opponent} win={oppWin} align="right" live={live} />
                     </div>
                   </div>
                 );
