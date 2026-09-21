@@ -424,6 +424,13 @@ async def compute_projections(
             else "medium"
         )
 
+        # A confirmed absence (Out / Doubtful / IR) scores nothing — zero the
+        # projection and its band so lineups and live totals don't count him.
+        if _is_absent(p.injury_status):
+            projected = 0.0
+            sigma = 0.0
+            confidence = "high"  # he's out — that part isn't uncertain
+
         out[p.id] = {
             "projected": round(projected, 1),
             "floor": round(max(0.0, projected - 0.9 * sigma), 1),

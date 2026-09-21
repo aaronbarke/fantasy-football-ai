@@ -192,6 +192,44 @@ def _display_lineup(all_slots: list[str], cards: list[dict]) -> list[dict]:
     return rows
 
 
+def _actual_lineup(all_slots: list[str], cards: list[dict], starter_ids: list[str]) -> list[dict]:
+    """The manager's ACTUAL starting lineup (who they really set), mapped to
+    slots by position — not the projection-optimal lineup. This is what the
+    matchup should show: a benched player (e.g. one sitting because he's Out)
+    must NOT appear as a starter."""
+    by_id = {c["id"]: c for c in cards}
+    pool = [by_id[sid] for sid in starter_ids if sid in by_id]
+    used: set[str] = set()
+
+    def pos(c: dict) -> str:
+        return (c.get("position") or "").upper()
+
+    def _fixed_match(slot: str, c: dict) -> bool:
+        if slot in {"DEF", "DST", "D/ST"}:
+            return pos(c) in {"DEF", "DST", "D/ST"}
+        return pos(c) == slot
+
+    assigned: dict[int, dict] = {}
+    # Fixed positions (incl. K/DEF) first, then flex from whoever's left — so a
+    # flex slot can't steal a player a dedicated slot needs.
+    for i, slot in enumerate(all_slots):
+        if slot in FLEX_ELIGIBLE:
+            continue
+        c = next((x for x in pool if x["id"] not in used and _fixed_match(slot, x)), None)
+        if c:
+            used.add(c["id"])
+            assigned[i] = c
+    for i, slot in enumerate(all_slots):
+        if slot not in FLEX_ELIGIBLE:
+            continue
+        eligible = FLEX_ELIGIBLE[slot]
+        c = next((x for x in pool if x["id"] not in used and pos(x) in eligible), None)
+        if c:
+            used.add(c["id"])
+            assigned[i] = c
+    return [{"slot": slot, "player": assigned.get(i)} for i, slot in enumerate(all_slots)]
+
+
 async def _matchup_team(
     db: AsyncSession,
     conn: LeagueConnection,
@@ -201,9 +239,15 @@ async def _matchup_team(
     kickoffs: dict[str, datetime],
     now: datetime,
     live: bool,
+    optimal: bool,
 ) -> dict:
     """Full display lineup, bench (with projections), and both a pre-game
     projected total and a LIVE expected total for one roster.
+
+    ``optimal`` picks the lineup: the user's side shows the projection-optimal
+    lineup (what they SHOULD start), while the opponent shows the lineup they
+    ACTUALLY set — so a player they benched (because he's Out, say) doesn't show
+    up as their starter.
 
     Live model: once a starter's NFL game has kicked off, his points are treated
     as already banked in ``current_points`` (the platform's live team score), so
@@ -212,7 +256,10 @@ async def _matchup_team(
     projection. K/DEF carry the league-average baseline, no variance."""
     proj = await compute_projections(db, list(roster.players), conn.season)
     cards = await _player_cards(db, list(roster.players), proj)
-    rows = _display_lineup(all_slots, cards)
+    if optimal or not (roster.starters or []):
+        rows = _display_lineup(all_slots, cards)
+    else:
+        rows = _actual_lineup(all_slots, cards, list(roster.starters or []))
     started_ids = {r["player"]["id"] for r in rows if r["player"]}
     bench = sorted(
         (c for c in cards if c["id"] not in started_ids and c.get("projected") is not None),
@@ -354,8 +401,10 @@ async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dic
     live = bool((user_points or 0) or (opp_points or 0))
 
     all_slots = _all_lineup_slots(conn)
-    user = await _matchup_team(db, conn, all_slots, user_roster, user_points, kickoffs, now, live)
-    opp = await _matchup_team(db, conn, all_slots, opp_roster, opp_points, kickoffs, now, live)
+    # Your side: the optimal lineup (what you should start). Opponent: what they
+    # actually set — you're stuck playing whoever they benched or started.
+    user = await _matchup_team(db, conn, all_slots, user_roster, user_points, kickoffs, now, live, True)
+    opp = await _matchup_team(db, conn, all_slots, opp_roster, opp_points, kickoffs, now, live, False)
 
     # Both lineups are built from the same slot list, so they align index-for-index
     rows = []
