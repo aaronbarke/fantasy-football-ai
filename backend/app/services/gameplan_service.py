@@ -173,13 +173,17 @@ def _display_lineup(all_slots: list[str], cards: list[dict]) -> list[dict]:
     for entry in skill_lineup:
         by_type[entry["slot"]].append(entry["player"])
 
-    pools: dict[str, deque] = defaultdict(deque)
-    for c in cards:
-        pos = (c.get("position") or "").upper()
-        if pos == "K":
-            pools["K"].append(c)
-        elif pos in {"DEF", "DST", "D/ST"}:
-            pools["DEF"].append(c)
+    # Fill K/DEF slots best-projection first, so the optimal streamer starts
+    # (a defense with a great matchup should beat the one you happen to roster).
+    def _by_proj(pos_set: set[str]) -> deque:
+        pool = [c for c in cards if (c.get("position") or "").upper() in pos_set]
+        pool.sort(key=lambda c: -(c.get("projected") or 0))
+        return deque(pool)
+
+    pools: dict[str, deque] = {
+        "K": _by_proj({"K"}),
+        "DEF": _by_proj({"DEF", "DST", "D/ST"}),
+    }
 
     rows = []
     for s in all_slots:
@@ -461,7 +465,9 @@ async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:
             p = s["player"]
             if not p or p["id"] in current_starters:
                 continue
-            if (p.get("position") or "").upper() in {"K", "DEF", "DST", "D/ST"}:
+            # Kicker start/sit is noise, but DEF now has a real matchup
+            # projection, so streaming calls there are worth surfacing.
+            if (p.get("position") or "").upper() == "K":
                 continue
             # Find the currently-started player at this position being displaced
             displaced = next(

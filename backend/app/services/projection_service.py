@@ -112,6 +112,45 @@ def sleeper_blend_weight(now: datetime | None, kickoff: datetime | None) -> floa
     return max(lo, min(hi, by_dow.get(ref.weekday(), lo)))
 
 
+# --- Team defense (DST) streaming model -------------------------------------
+# We don't carry DST box-score history, and projecting sacks/turnovers/TDs
+# individually is noise. The single best predictor of a defense's fantasy week
+# is how little its opponent's offense is expected to do — a bad offense means
+# more sacks, more turnovers, and a favorable points-allowed tier. So we drive
+# the DST projection off the opponent's Vegas implied total: a defense facing a
+# team implied for far fewer points than average is a great streamer, even if
+# the defense itself isn't elite.
+DST_BASELINE = 7.0  # league-average DST fantasy week (PPR-neutral)
+DST_IMPLIED_SLOPE = 0.5  # pts gained per point the opponent is implied below avg
+DST_MIN, DST_MAX = 2.0, 15.0
+DST_STDEV_FRAC = 0.6  # DST scoring is boom/bust — a wide band
+
+
+def _dst_projection(
+    opp_implied: float | None, gc: GameCondition | None
+) -> tuple[float, float, str]:
+    """(projected points, weather bump, matchup label) for a team defense."""
+    base = DST_BASELINE
+    if opp_implied is not None:
+        base = DST_BASELINE + DST_IMPLIED_SLOPE * (LEAGUE_AVG_TEAM_TOTAL - opp_implied)
+    weather_adj = 0.0
+    if gc is not None and not getattr(gc, "dome", False):
+        wind = float(gc.wind_mph or 0)
+        precip = float(gc.precipitation_pct or 0)
+        if wind > 15 or precip >= 50:
+            weather_adj = 1.0  # sloppy conditions → more turnovers, lower scoring
+    proj = max(DST_MIN, min(DST_MAX, base + weather_adj))
+    if opp_implied is None:
+        label = "unknown"
+    elif opp_implied <= LEAGUE_AVG_TEAM_TOTAL - 4:
+        label = "great"
+    elif opp_implied >= LEAGUE_AVG_TEAM_TOTAL + 4:
+        label = "tough"
+    else:
+        label = "neutral"
+    return proj, weather_adj, label
+
+
 def _weather_adjust(position: str | None, base: float, gc: GameCondition | None) -> float:
     """Points adjustment from game-day weather (0 indoors / unknown)."""
     if gc is None or getattr(gc, "dome", False):
@@ -160,35 +199,40 @@ async def compute_projections(
     if not player_ids:
         return {}
 
-    players = (
+    all_players = (
         (await db.execute(select(Player).where(Player.id.in_(player_ids)))).scalars().all()
     )
-    players = [p for p in players if p.position in PROJECTABLE]
-    if not players:
+    players = [p for p in all_players if p.position in PROJECTABLE]
+    # Team defenses are projected separately (matchup-driven, no box-score
+    # history), so keep them aside rather than dropping them.
+    dst_players = [p for p in all_players if p.position == "DEF"]
+    if not players and not dst_players:
         return {}
     ids = [p.id for p in players]
 
     latest_season = (
         await db.execute(select(func.max(PlayerStatsWeekly.season)))
     ).scalar()
-    if latest_season is None:
+    if latest_season is None and not dst_players:
         return {}
 
-    rows = (
-        await db.execute(
-            select(
-                PlayerStatsWeekly.player_id,
-                PlayerStatsWeekly.season,
-                PlayerStatsWeekly.week,
-                PlayerStatsWeekly.fantasy_points_ppr,
-            ).where(
-                PlayerStatsWeekly.player_id.in_(ids),
-                PlayerStatsWeekly.season >= latest_season - 1,
-                PlayerStatsWeekly.week <= REGULAR_SEASON_MAX_WEEK,
-                PlayerStatsWeekly.fantasy_points_ppr.is_not(None),
+    rows = []
+    if ids and latest_season is not None:
+        rows = (
+            await db.execute(
+                select(
+                    PlayerStatsWeekly.player_id,
+                    PlayerStatsWeekly.season,
+                    PlayerStatsWeekly.week,
+                    PlayerStatsWeekly.fantasy_points_ppr,
+                ).where(
+                    PlayerStatsWeekly.player_id.in_(ids),
+                    PlayerStatsWeekly.season >= latest_season - 1,
+                    PlayerStatsWeekly.week <= REGULAR_SEASON_MAX_WEEK,
+                    PlayerStatsWeekly.fantasy_points_ppr.is_not(None),
+                )
             )
-        )
-    ).all()
+        ).all()
 
     latest_weeks = [r.week for r in rows if r.season == latest_season]
     recent_cutoff = (max(latest_weeks) if latest_weeks else 18) - RECENT_WINDOW
@@ -202,7 +246,11 @@ async def compute_projections(
         per_player[r.player_id].append((float(r.fantasy_points_ppr), w))
 
     # Opponent + game environment lookups
-    dvp = await defense_vs_position_ranks(db, int(latest_season))
+    dvp = (
+        await defense_vs_position_ranks(db, int(latest_season))
+        if latest_season is not None
+        else {}
+    )
     league_avg_by_pos: dict[str, float] = {}
     for (_, pos), v in dvp.items():
         league_avg_by_pos.setdefault(pos, 0.0)
@@ -210,7 +258,7 @@ async def compute_projections(
         vals = [v["pts_allowed_avg"] for (_, p), v in dvp.items() if p == pos]
         league_avg_by_pos[pos] = sum(vals) / len(vals) if vals else 0.0
 
-    teams = {p.team for p in players if p.team}
+    teams = {p.team for p in (players + dst_players) if p.team}
     next_opponent: dict[str, dict] = {}
     if teams:
         games = (
@@ -393,6 +441,37 @@ async def compute_projections(
                 "defense_injury_adj": defense_injury_adj,
                 "external_proj": round(ext, 1) if ext is not None else None,
                 "opponent": opponent,
+                "week": game["week"] if game else None,
+                "home": game["home"] if game else None,
+            },
+        }
+
+    # Team defenses: matchup-driven projection off the opponent's implied total.
+    for p in dst_players:
+        game = next_opponent.get(p.team or "")
+        opponent = game["opponent"] if game else None
+        opp_implied = implied.get(opponent) if opponent else None
+        gc = gc_by_team_week.get((p.team, game["week"])) if game else None
+        proj, dst_weather, matchup_label = _dst_projection(opp_implied, gc)
+        sigma = proj * DST_STDEV_FRAC
+        out[p.id] = {
+            "projected": round(proj, 1),
+            "floor": round(max(0.0, proj - sigma), 1),
+            "ceiling": round(proj + sigma, 1),
+            "confidence": "low",  # DST weeks are boom/bust
+            "stdev": round(sigma, 1),
+            "boost_reason": None,
+            "defense_reason": (
+                f"{matchup_label} matchup vs {opponent} (implied {opp_implied:.0f})"
+                if opp_implied is not None and opponent
+                else None
+            ),
+            "components": {
+                "base_ppg": DST_BASELINE,
+                "weather_adj": round(dst_weather, 1),
+                "opponent": opponent,
+                "opponent_implied_total": round(opp_implied, 1) if opp_implied is not None else None,
+                "matchup": matchup_label,
                 "week": game["week"] if game else None,
                 "home": game["home"] if game else None,
             },
