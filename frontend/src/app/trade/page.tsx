@@ -108,7 +108,7 @@ function TradeSide({
 }) {
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-5">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+      <h2 className="text-sm font-semibold text-gray-900">
         {title}
       </h2>
       <div className="mt-3 space-y-2">
@@ -298,7 +298,7 @@ export default function TradePage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="flex items-center gap-2 text-base font-bold">
-                <Search className="h-4 w-4 text-green-600" />
+                <Search className="h-4 w-4 text-accent" />
                 Trade Finder
               </h2>
               <p className="mt-0.5 text-sm text-gray-500">
@@ -336,7 +336,7 @@ export default function TradePage() {
               <button
                 onClick={findTrades}
                 disabled={finding || !league}
-                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-500 disabled:opacity-50"
+                className="button-accent"
               >
                 {finding ? "Scanning league…" : "Find trades for me"}
               </button>
@@ -380,7 +380,7 @@ export default function TradePage() {
                   <p className="mt-1 text-xs text-gray-500">{t.rationale}</p>
                   <button
                     onClick={() => loadIntoAnalyzer(t)}
-                    className="mt-2 text-xs font-semibold text-green-600 hover:underline"
+                    className="mt-2 text-xs font-semibold text-accent-ink hover:underline"
                   >
                     Analyze this deal →
                   </button>
@@ -409,7 +409,7 @@ export default function TradePage() {
           <button
             onClick={analyze}
             disabled={busy || give.length === 0 || receive.length === 0}
-            className="flex items-center gap-2 rounded-lg bg-green-600 px-6 py-3 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-accent-fg hover:bg-accent-hover disabled:opacity-50"
           >
             <ArrowLeftRight className="h-4 w-4" />
             {busy ? "Analyzing…" : "Analyze trade"}
@@ -441,10 +441,10 @@ export default function TradePage() {
                 return (
                   <div className="flex items-center justify-between gap-4">
                     <div className="text-center">
-                      <p className="text-xs uppercase tracking-wide text-gray-500">
+                      <p className="text-xs font-medium text-gray-500">
                         You give
                       </p>
-                      <p className="text-3xl font-extrabold tabular-nums">
+                      <p className="text-3xl font-mono font-semibold tracking-tight">
                         {result.give_value.toFixed(1)}
                       </p>
                     </div>
@@ -463,10 +463,10 @@ export default function TradePage() {
                       </div>
                     </div>
                     <div className="text-center">
-                      <p className="text-xs uppercase tracking-wide text-gray-500">
+                      <p className="text-xs font-medium text-gray-500">
                         You receive
                       </p>
-                      <p className="text-3xl font-extrabold tabular-nums">
+                      <p className="text-3xl font-mono font-semibold tracking-tight">
                         {result.receive_value.toFixed(1)}
                       </p>
                     </div>

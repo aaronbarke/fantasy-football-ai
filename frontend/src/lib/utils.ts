@@ -40,17 +40,17 @@ export function injuryTextColor(status: string | null | undefined): string {
 export function positionColor(position: string | null | undefined): string {
   switch (position) {
     case "QB":
-      return "bg-red-500";
+      return "bg-rose-500";
     case "RB":
-      return "bg-blue-500";
+      return "bg-sky-500";
     case "WR":
-      return "bg-green-500";
+      return "bg-violet-500";
     case "TE":
-      return "bg-orange-500";
+      return "bg-amber-500";
     case "K":
-      return "bg-purple-500";
+      return "bg-teal-500";
     case "DEF":
-      return "bg-gray-600";
+      return "bg-zinc-600";
     default:
       return "bg-gray-400";
   }

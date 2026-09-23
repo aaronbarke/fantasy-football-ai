@@ -145,8 +145,15 @@ function ChatInner() {
               </p>
               <div className="chat-prompts">
                 {starters.map((s, i) => (
-                  <button key={s} onClick={() => send(s)}>
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-green-700">
+                  <button
+                    key={s}
+                    onClick={() => send(s)}
+                    className={
+                      ["tone-blue", "tone-rose", "tone-violet", "tone-emerald"][i]
+                    }
+                  >
+                    <span className="tone-text flex items-center gap-2 text-xs font-semibold">
+                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
                       {
                         [
                           "Set your lineup",
@@ -177,7 +184,7 @@ function ChatInner() {
               <button
                 key={s}
                 onClick={() => send(s)}
-                className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-600 hover:border-green-400 hover:bg-green-50"
+                className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-600 hover:border-accent/40 hover:text-ink"
               >
                 {s}
               </button>
@@ -227,7 +234,7 @@ function ChatInner() {
             <button
               type="submit"
               disabled={!input.trim() || !league}
-              className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg hover:bg-accent-hover disabled:opacity-50"
               aria-label="Send"
             >
               <Send className="h-4 w-4" />

@@ -85,7 +85,7 @@ export default function SchedulePage() {
               onClick={() => setWindow(key)}
               className={`rounded-md px-3 py-1.5 text-sm font-medium ${
                 window === key
-                  ? "bg-green-600 text-white"
+                  ? "bg-ink text-canvas"
                   : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
               }`}
             >
@@ -111,7 +111,7 @@ export default function SchedulePage() {
           <div className="mt-6 overflow-x-auto rounded-xl border border-gray-200 bg-white">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
+                <tr className="border-b font-medium border-gray-200 text-left text-xs text-gray-500">
                   <th className="px-4 py-3">Player</th>
                   {data.weeks.map((w) => (
                     <th key={w} className="px-2 py-3 text-center">
@@ -155,7 +155,7 @@ export default function SchedulePage() {
                                 ? `${c.opponent} allows ${c.pts_allowed_avg} PPR/gm to ${p.position}s (rank ${c.rank}/32)`
                                 : undefined
                             }
-                            className={`w-full rounded px-1.5 py-1.5 text-xs font-medium hover:ring-2 hover:ring-green-400 ${cellColor(c.rank)}`}
+                            className={`w-full rounded px-1.5 py-1.5 text-xs font-medium hover:ring-2 hover:ring-accent ${cellColor(c.rank)}`}
                           >
                             {c.home ? "" : "@"}
                             {c.opponent}

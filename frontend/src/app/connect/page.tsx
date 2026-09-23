@@ -82,13 +82,13 @@ export default function ConnectPage() {
         </Link>
       </div>
       <div className="mx-auto mt-12 max-w-lg sm:mt-20">
-        <div className="mb-8 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-green-100 text-green-700">
+        <div className="mb-8 flex items-center gap-3 text-xs font-semibold text-gray-500">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent-soft text-accent">
             <Check className="h-3 w-3" />
           </span>
           Account
           <span className="h-px flex-1 bg-gray-200" />
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-green-700 text-white">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ink text-canvas">
             2
           </span>
           Your league
@@ -103,7 +103,7 @@ export default function ConnectPage() {
         </p>
         <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 sm:p-8">
           <div
-            className="grid grid-cols-2 gap-2 rounded-xl bg-gray-50 p-1"
+            className="segmented grid w-full grid-cols-2"
             aria-label="Fantasy platform"
           >
             {(["sleeper", "espn"] as const).map((p) => (
@@ -115,7 +115,7 @@ export default function ConnectPage() {
                   setPlatform(p);
                   setError(null);
                 }}
-                className={`rounded-lg px-4 py-3 text-sm font-semibold ${platform === p ? "bg-green-700 text-white" : "text-gray-500 hover:bg-gray-100"}`}
+                className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${platform === p ? "chip-active" : "text-gray-500 hover:text-ink"}`}
               >
                 {p === "espn" ? "ESPN" : "Sleeper"}
               </button>
@@ -158,7 +158,7 @@ export default function ConnectPage() {
                         <button
                           onClick={() => connect(lg.league_id, lg.season)}
                           disabled={busy}
-                          className="w-full rounded-lg border border-gray-200 p-4 text-left hover:border-green-500 hover:bg-green-50 disabled:opacity-50"
+                          className="w-full rounded-lg border border-gray-200 p-4 text-left hover:border-accent/50 hover:bg-accent-soft/40 disabled:opacity-50"
                         >
                           <p className="text-sm font-semibold">{lg.name}</p>
                           <p className="mt-1 text-xs text-gray-500">
@@ -270,7 +270,7 @@ export default function ConnectPage() {
         </p>
         <Link
           href="/draft"
-          className="mt-7 block text-center text-xs font-semibold text-green-700"
+          className="mt-7 block text-center text-xs font-semibold text-accent-ink"
         >
           Just preparing? Explore the draft room →
         </Link>

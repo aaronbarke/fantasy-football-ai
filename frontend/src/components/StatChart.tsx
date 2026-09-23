@@ -25,15 +25,25 @@ export default function StatChart({ stats }: { stats: WeeklyStat[] }) {
   return (
     <ResponsiveContainer width="100%" height={180}>
       <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
-        <XAxis dataKey="week" fontSize={12} tickLine={false} />
-        <YAxis fontSize={12} tickLine={false} axisLine={false} />
+        <XAxis
+          dataKey="week"
+          fontSize={12}
+          tickLine={false}
+          stroke="rgb(var(--muted))"
+        />
+        <YAxis
+          fontSize={12}
+          tickLine={false}
+          axisLine={false}
+          stroke="rgb(var(--muted))"
+        />
         <Tooltip
           formatter={(value) => [`${Number(value).toFixed(1)} pts`, "PPR"]}
         />
         <Line
           type="monotone"
           dataKey="points"
-          stroke="#16a34a"
+          stroke="rgb(var(--accent))"
           strokeWidth={2}
           dot={{ r: 3 }}
         />

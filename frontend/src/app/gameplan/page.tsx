@@ -53,7 +53,7 @@ function WinDial({ probability }: { probability: number }) {
   const r = 52;
   const circumference = Math.PI * r; // semicircle
   const filled = circumference * probability;
-  const color = pct >= 60 ? "#16a34a" : pct >= 45 ? "#d97706" : "#dc2626";
+  const color = pct >= 60 ? "#10b981" : pct >= 45 ? "#d97706" : "#dc2626";
   return (
     <div className="relative flex flex-col items-center">
       <svg width="140" height="84" viewBox="0 0 140 84">
@@ -75,10 +75,10 @@ function WinDial({ probability }: { probability: number }) {
         />
       </svg>
       <div className="absolute bottom-0 text-center">
-        <p className="text-3xl font-extrabold" style={{ color }}>
+        <p className="text-3xl font-semibold tracking-tight" style={{ color }}>
           {pct}%
         </p>
-        <p className="text-[10px] uppercase tracking-wide text-gray-400">
+        <p className="text-xs font-medium text-gray-400">
           win prob
         </p>
       </div>
@@ -96,11 +96,11 @@ function ProjBar({ p }: { p: PlanPlayer }) {
         style={{ width: `${(p.floor / max) * 100}%` }}
       />
       <div
-        className="bg-green-500"
+        className="bg-accent"
         style={{ width: `${((p.projected - p.floor) / max) * 100}%` }}
       />
       <div
-        className="bg-green-200 dark:bg-green-900"
+        className="bg-accent/25"
         style={{ width: `${((p.ceiling - p.projected) / max) * 100}%` }}
       />
     </div>
@@ -227,7 +227,7 @@ export default function GamePlanPage() {
             <button
               onClick={getBrief}
               disabled={busy}
-              className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-fg transition-colors hover:bg-accent-hover disabled:opacity-50"
             >
               <Sparkles className="h-4 w-4" />
               {busy ? "Writing your brief…" : "Explain my game plan"}
@@ -257,10 +257,10 @@ export default function GamePlanPage() {
             {/* Scoreboard strip */}
             <div className="mt-6 grid gap-4 sm:grid-cols-3">
               <div className="rounded-xl border border-gray-200 bg-white p-5 text-center">
-                <p className="text-xs uppercase tracking-wide text-gray-400">
+                <p className="text-xs font-medium text-gray-400">
                   Projected score
                 </p>
-                <p className="mt-1 text-4xl font-extrabold text-green-700">
+                <p className="mt-1 font-mono text-4xl font-semibold tracking-tight text-accent">
                   {plan.projected_total}
                 </p>
               </div>
@@ -270,11 +270,11 @@ export default function GamePlanPage() {
                     <WinDial probability={plan.opponent.win_probability} />
                   </div>
                   <div className="rounded-xl border border-gray-200 bg-white p-5 text-center">
-                    <p className="text-xs uppercase tracking-wide text-gray-400">
+                    <p className="text-xs font-medium text-gray-400">
                       {plan.opponent.name ?? "Opponent"} · Wk{" "}
                       {plan.opponent.week}
                     </p>
-                    <p className="mt-1 text-4xl font-extrabold text-gray-400">
+                    <p className="mt-1 text-4xl font-semibold tracking-tight text-gray-400">
                       {plan.opponent.projected_total}
                     </p>
                   </div>
@@ -321,7 +321,7 @@ export default function GamePlanPage() {
             )}
 
             {brief && (
-              <div className="prose-sm mt-6 rounded-xl border border-green-200 bg-green-50 p-6 text-sm leading-relaxed">
+              <div className="prose-sm mt-6 rounded-xl callout p-6 text-sm leading-relaxed">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {brief}
                 </ReactMarkdown>
@@ -330,7 +330,7 @@ export default function GamePlanPage() {
 
             <div className="mt-6 grid gap-8 lg:grid-cols-2">
               <section>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                <h2 className="text-sm font-semibold text-gray-900">
                   Suggested lineup
                 </h2>
                 <div className="mt-3 space-y-2">
@@ -344,7 +344,7 @@ export default function GamePlanPage() {
                 </div>
               </section>
               <section>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                <h2 className="text-sm font-semibold text-gray-900">
                   Your bench
                 </h2>
                 <div className="mt-3 space-y-2">

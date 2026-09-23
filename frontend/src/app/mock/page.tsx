@@ -274,14 +274,14 @@ export default function MockDraftPage() {
               <button
                 onClick={startDraft}
                 disabled={busy}
-                className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg hover:bg-accent-hover disabled:opacity-50"
               >
                 <Play className="h-4 w-4" />
                 {busy ? "Setting up…" : "Start mock draft"}
               </button>
               {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
             </div>
-            <aside className="mock-story">
+            <aside className="mock-story stage">
               <p className="eyebrow">Room to experiment</p>
               <h2>
                 Find your rhythm.
@@ -355,7 +355,7 @@ export default function MockDraftPage() {
                     <Trophy className="h-4 w-4" /> Draft complete
                   </span>
                 ) : state.is_my_turn ? (
-                  <span className="flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1 text-sm font-semibold text-white">
+                  <span className="flex items-center gap-1.5 rounded-lg bg-signal px-3 py-1 text-sm font-semibold text-zinc-900">
                     <Zap className="h-4 w-4" /> You&apos;re on the clock · pick
                     #{state.on_the_clock}
                   </span>
@@ -371,7 +371,7 @@ export default function MockDraftPage() {
                 pick reads as real draft action, not a random skip. */}
             {state.is_my_turn && sinceYourLastPick.length > 0 && (
               <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <p className="text-xs font-semibold text-gray-500">
                   {sinceYourLastPick.length} taken since your last pick
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -397,7 +397,7 @@ export default function MockDraftPage() {
 
             {/* Results */}
             {state.status === "complete" && results && (
-              <div className="mt-5 rounded-xl border border-green-200 bg-green-50 p-5">
+              <div className="mt-5 rounded-xl callout p-5">
                 <h2 className="text-lg font-bold">
                   You finished {results.your_rank} of {results.teams}
                 </h2>
@@ -408,7 +408,7 @@ export default function MockDraftPage() {
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   {results.best_pick && (
                     <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm">
-                      <p className="text-xs font-semibold uppercase text-gray-500">
+                      <p className="text-xs font-semibold text-gray-500">
                         Best value
                       </p>
                       <p className="font-semibold">{results.best_pick.name}</p>
@@ -423,7 +423,7 @@ export default function MockDraftPage() {
                   )}
                   {results.worst_pick && (
                     <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm">
-                      <p className="text-xs font-semibold uppercase text-gray-500">
+                      <p className="text-xs font-semibold text-gray-500">
                         Biggest reach
                       </p>
                       <p className="font-semibold">{results.worst_pick.name}</p>
@@ -448,7 +448,7 @@ export default function MockDraftPage() {
                         onClick={() => setFilter(p)}
                         className={`rounded-full px-3 py-1 text-xs font-semibold ${
                           filter === p
-                            ? "bg-green-600 text-white"
+                            ? "bg-ink text-canvas"
                             : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                         }`}
                       >
@@ -486,7 +486,7 @@ export default function MockDraftPage() {
                       <button
                         onClick={() => pick(p.player_id)}
                         disabled={!state.is_my_turn || busy}
-                        className="rounded-md bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-40"
+                        className="rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-accent-fg hover:bg-accent-hover disabled:opacity-40"
                       >
                         Draft
                       </button>
@@ -505,7 +505,7 @@ export default function MockDraftPage() {
                 {state.is_my_turn &&
                   (state.recommendations ?? []).length > 0 && (
                     <div className="rounded-xl border border-gray-200 bg-white p-5">
-                      <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                      <h2 className="text-sm font-semibold text-gray-900">
                         Suggested
                       </h2>
                       <ul className="mt-3 space-y-3">
@@ -526,7 +526,7 @@ export default function MockDraftPage() {
                               <button
                                 onClick={() => pick(r.player_id)}
                                 disabled={busy}
-                                className="rounded-md bg-green-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-green-700 disabled:opacity-40"
+                                className="rounded-md bg-accent px-2 py-0.5 text-[11px] font-semibold text-accent-fg hover:bg-accent-hover disabled:opacity-40"
                               >
                                 Draft
                               </button>
@@ -545,7 +545,7 @@ export default function MockDraftPage() {
                   )}
 
                 <div className="rounded-xl border border-gray-200 bg-white p-5">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                  <h2 className="text-sm font-semibold text-gray-900">
                     Your team ({myRoster.length})
                   </h2>
                   <ul className="mt-3 space-y-1.5">
@@ -579,7 +579,7 @@ export default function MockDraftPage() {
                 </div>
 
                 <div className="rounded-xl border border-gray-200 bg-white p-5">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                  <h2 className="text-sm font-semibold text-gray-900">
                     Recent picks
                   </h2>
                   <ul className="mt-3 space-y-1.5">

@@ -53,7 +53,7 @@ export default function WaiversPage() {
           </div>
           <Link
             href={`/chat?q=${encodeURIComponent("Who should I pick up off waivers, and who should I drop?")}`}
-            className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-fg hover:bg-accent-hover"
           >
             Find a pickup
           </Link>
@@ -66,7 +66,7 @@ export default function WaiversPage() {
               onClick={() => setFilter(p)}
               className={`rounded-full px-3 py-1 text-xs font-semibold ${
                 filter === p
-                  ? "bg-green-600 text-white"
+                  ? "bg-ink text-canvas"
                   : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >

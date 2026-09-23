@@ -19,7 +19,7 @@ import {
   YAxis,
 } from "recharts";
 
-const COLORS = ["#16a34a", "#2563eb", "#ea580c"];
+const COLORS = ["#3b6af0", "#f59e0b", "#ec4899"];
 const METRICS = [
   { key: "fantasy_points_ppr", label: "PPR points" },
   { key: "targets", label: "Targets" },
@@ -220,7 +220,7 @@ export default function ComparePage() {
               onClick={() => setMetric(m.key)}
               className={`rounded-full px-3 py-1 text-xs font-semibold ${
                 metric === m.key
-                  ? "bg-green-600 text-white"
+                  ? "bg-ink text-canvas"
                   : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >

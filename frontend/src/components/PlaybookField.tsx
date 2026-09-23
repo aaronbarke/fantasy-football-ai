@@ -29,15 +29,18 @@ export default function PlaybookField() {
             ))}
           </g>
         ))}
+        <path d="M28 286h344" stroke="#6b8aff" strokeWidth="2.5" />
+        <path d="M28 196h344" stroke="rgb(var(--signal))" strokeWidth="2.5" strokeOpacity=".9" />
         <path
           d="M103 331V216l71-75M295 329V216l-60-55M201 365V253"
-          stroke="#c9e8a5"
+          stroke="#e4e4e7"
+          strokeOpacity=".75"
           strokeWidth="2"
           strokeDasharray="6 7"
         />
         <path
           d="m158 141 16 0 0 16M235 177v-16h16m-58 103 8-11 8 11"
-          stroke="#c9e8a5"
+          stroke="#e4e4e7"
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -54,17 +57,17 @@ export default function PlaybookField() {
               cx={x}
               cy={y}
               r="20"
-              fill="#1d4833"
-              stroke="#d8e9c5"
+              fill="#18181b"
+              stroke="#6b8aff"
               strokeWidth="1.5"
             />
             <text
               x={x}
               y={Number(y) + 4}
               textAnchor="middle"
-              fill="#e5efdc"
+              fill="#fafafa"
               fontSize="10"
-              fontFamily="sans-serif"
+              fontFamily="var(--font-geist-mono), monospace"
               fontWeight="600"
             >
               {label}

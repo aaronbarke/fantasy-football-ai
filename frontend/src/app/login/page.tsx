@@ -117,11 +117,11 @@ export default function LoginPage() {
 
   return (
     <main className="auth-page">
-      <aside className="auth-story">
+      <aside className="auth-story stage">
         <Brand href="/" light />
         <h2>Your next great call starts here.</h2>
         <PlaybookField />
-        <p>YOUR ROSTER. YOUR RESEARCH. ONE WORKSPACE.</p>
+        <p>Your roster, your research, one workspace.</p>
       </aside>
       <div className="auth-form-area">
         <div className="auth-form">
@@ -212,7 +212,7 @@ export default function LoginPage() {
                 setMode(mode === "login" ? "register" : "login");
                 setError(null);
               }}
-              className="font-semibold text-green-700 hover:underline"
+              className="font-semibold text-accent-ink hover:underline"
             >
               {mode === "login" ? "Create an account" : "Sign in"}
             </button>
@@ -223,7 +223,7 @@ export default function LoginPage() {
             disabled={busy}
             className="button-secondary w-full"
           >
-            <Sparkles className="h-4 w-4 text-green-700" />
+            <Sparkles className="h-4 w-4 text-accent" />
             Explore the demo
           </button>
           <p className="mt-3 text-center text-xs leading-5 text-gray-500">
@@ -231,7 +231,7 @@ export default function LoginPage() {
           </p>
           <Link
             href="/"
-            className="mt-9 block text-center text-xs text-gray-500 hover:text-green-700"
+            className="mt-9 block text-center text-xs text-gray-500 hover:text-ink"
           >
             ← Back to FFAI
           </Link>

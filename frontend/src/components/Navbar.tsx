@@ -38,6 +38,7 @@ import Brand from "./Brand";
 const groups = [
   {
     label: "Your team",
+    tone: "tone-blue",
     links: [
       { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
       { href: "/gameplan", label: "Game plan", icon: ClipboardList },
@@ -48,6 +49,7 @@ const groups = [
   },
   {
     label: "Make your move",
+    tone: "tone-violet",
     links: [
       { href: "/chat", label: "Ask your assistant", icon: MessageSquare },
       { href: "/trade", label: "Trade analyzer", icon: ArrowLeftRight },
@@ -57,6 +59,7 @@ const groups = [
   },
   {
     label: "Draft & research",
+    tone: "tone-amber",
     links: [
       { href: "/draft", label: "Draft room", icon: Radio },
       { href: "/mock", label: "Mock draft", icon: Trophy },
@@ -172,7 +175,7 @@ export default function Navbar() {
         </div>
         <nav className="sidebar-links" aria-label="Main navigation">
           {groups.map((group) => (
-            <div key={group.label} className="nav-group">
+            <div key={group.label} className={`nav-group ${group.tone}`}>
               <p>{group.label}</p>
               {group.links.map((link) => (
                 <Link
@@ -200,7 +203,7 @@ export default function Navbar() {
             <ArrowUpRight className="ml-auto h-4 w-4" />
           </Link>
           <div className="flex items-center justify-between pt-3">
-            <span className="text-[11px] text-gray-500">
+            <span className="text-xs text-gray-500">
               Built for your next move.
             </span>
             <button
@@ -230,10 +233,10 @@ export default function Navbar() {
           >
             <Menu className="h-5 w-5" />
           </button>
-          <span className="hidden text-xs text-gray-400 sm:inline">
+          <span className="hidden text-sm text-gray-500 sm:inline">
             Workspace
           </span>
-          <span className="hidden text-gray-300 sm:inline">/</span>
+          <span className="hidden text-gray-300 sm:inline dark:text-gray-600">/</span>
           <span className="truncate text-sm font-medium">
             {current?.label ?? "Your league"}
           </span>
@@ -286,7 +289,7 @@ export default function Navbar() {
                     ))}
                     <Link
                       href="/connect"
-                      className="league-option flex items-center gap-2 text-green-700"
+                      className="league-option flex items-center gap-2 font-medium text-accent-ink"
                     >
                       <Plus className="h-4 w-4" />
                       Connect another league
@@ -297,7 +300,7 @@ export default function Navbar() {
             ) : (
               <Link
                 href="/connect"
-                className="text-xs font-semibold text-green-700"
+                className="button-secondary !min-h-[32px] !px-3 !text-xs"
               >
                 Connect league
               </Link>

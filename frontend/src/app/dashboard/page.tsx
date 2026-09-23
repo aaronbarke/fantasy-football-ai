@@ -19,6 +19,7 @@ import {
   Database,
   MessageCircle,
   RefreshCw,
+  Shield,
   Swords,
   Target,
   TrendingUp,
@@ -28,23 +29,29 @@ import {
 import { useState } from "react";
 
 const quickAsks = [
-  { q: "Who should I start this week?", icon: Target },
-  { q: "Who should I pick up off waivers?", icon: TrendingUp },
-  { q: "Break down my matchup this week", icon: Swords },
+  { q: "Who should I start this week?", icon: Target, tone: "tone-blue" },
+  { q: "Who should I pick up off waivers?", icon: TrendingUp, tone: "tone-emerald" },
+  { q: "Break down my matchup this week", icon: Swords, tone: "tone-rose" },
 ];
 
 /* ── Design-system primitives ── */
 
 function SectionLabel({
   icon: Icon,
+  tone = "tone-blue",
   children,
 }: {
   icon?: React.ComponentType<{ className?: string }>;
+  tone?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400">
-      {Icon && <Icon className="h-3.5 w-3.5" />}
+    <div className={`${tone} flex items-center gap-2 text-[13px] font-medium text-gray-600`}>
+      {Icon && (
+        <span className="tone-chip h-6 w-6 !rounded-md">
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+      )}
       {children}
     </div>
   );
@@ -54,22 +61,28 @@ function Stat({
   label,
   value,
   sub,
+  icon: Icon,
+  tone,
 }: {
   label: string;
   value: string;
   sub?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  tone: string;
 }) {
   return (
-    <div className="px-4 py-4 text-center">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-gray-400">
+    <div className={`${tone} relative px-5 py-4`}>
+      <span className="absolute inset-x-5 top-0 h-0.5 rounded-b-full bg-[rgb(var(--tone))]" />
+      <p className="flex items-center justify-between text-[13px] font-medium text-gray-500">
         {label}
+        <span className="tone-chip h-7 w-7 !rounded-lg">
+          <Icon className="h-3.5 w-3.5" />
+        </span>
       </p>
-      <p className="mt-1 text-2xl font-extrabold tabular-nums text-gray-900 dark:text-gray-100">
+      <p className="mt-1 font-mono text-[26px] font-semibold leading-none tracking-tight text-gray-900 dark:text-gray-100">
         {value}
       </p>
-      {sub && (
-        <p className="mt-0.5 text-[11px] tabular-nums text-gray-400">{sub}</p>
-      )}
+      {sub && <p className="mt-1.5 text-xs tabular-nums text-gray-400">{sub}</p>}
     </div>
   );
 }
@@ -164,12 +177,12 @@ export default function DashboardPage() {
         {/* ── Header: identity + quiet controls ── */}
         <div className="page-heading">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-green-600 dark:text-green-400">
+            <p className="eyebrow">
               {league
-                ? `${league.platform} · ${league.season} season`
+                ? `${league.platform.charAt(0).toUpperCase()}${league.platform.slice(1)} · ${league.season} season`
                 : "Your team at a glance"}
             </p>
-            <h1 className="mt-1.5 text-3xl font-extrabold tracking-tight text-gray-900 dark:text-gray-100 sm:text-4xl">
+            <h1>
               {league?.league_name ?? "Your overview"}
             </h1>
             {roster && (
@@ -186,7 +199,7 @@ export default function DashboardPage() {
                 onClick={syncNow}
                 disabled={syncing}
                 title="Re-sync this league's rosters, standings, and matchups"
-                className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                className="button-secondary"
               >
                 <RefreshCw
                   className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
@@ -197,7 +210,7 @@ export default function DashboardPage() {
                 onClick={refreshStats}
                 disabled={refreshingStats}
                 title="Re-pull this week's NFL stats. Refreshes values, projections, and schedule strength"
-                className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                className="button-secondary"
               >
                 <Database
                   className={`h-4 w-4 ${refreshingStats ? "animate-pulse" : ""}`}
@@ -206,7 +219,8 @@ export default function DashboardPage() {
               </button>
             </div>
             {league?.last_synced_at && (
-              <p className="text-[11px] text-gray-400">
+              <p className="flex items-center gap-1.5 text-xs text-gray-400 sm:justify-end">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
                 Synced {timeAgo(league.last_synced_at)}
               </p>
             )}
@@ -217,9 +231,9 @@ export default function DashboardPage() {
         {rosterLoading ? (
           <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-gray-200/70 bg-white dark:border-gray-800/70 sm:grid-cols-4">
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="px-4 py-4 text-center">
-                <div className="skeleton mx-auto h-3 w-12" />
-                <div className="skeleton mx-auto mt-2 h-7 w-16" />
+              <div key={i} className="px-5 py-4">
+                <div className="skeleton h-3 w-12" />
+                <div className="skeleton mt-2 h-7 w-16" />
               </div>
             ))}
           </div>
@@ -227,21 +241,29 @@ export default function DashboardPage() {
           <div className="mt-6 grid grid-cols-2 divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-200/70 bg-white dark:divide-gray-800/70 dark:border-gray-800/70 sm:grid-cols-4 sm:divide-y-0 sm:divide-x">
             <Stat
               label="Record"
+              icon={Trophy}
+              tone="tone-blue"
               value={formatRecord(roster.wins, roster.losses, roster.ties)}
               sub={games > 0 ? `${games} games` : "preseason"}
             />
             <Stat
               label="Rank"
+              icon={Crown}
+              tone="tone-violet"
               value={rank ? `#${rank}` : "—"}
               sub={totalTeams ? `of ${totalTeams}` : undefined}
             />
             <Stat
               label="Points for"
+              icon={TrendingUp}
+              tone="tone-emerald"
               value={roster.points_for.toFixed(1)}
               sub={ppg ? `${ppg.toFixed(1)} / gm` : undefined}
             />
             <Stat
               label="Points against"
+              icon={Shield}
+              tone="tone-rose"
               value={roster.points_against.toFixed(1)}
             />
           </div>
@@ -287,17 +309,15 @@ export default function DashboardPage() {
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
           {/* Matchup */}
           <div className="rounded-2xl border border-gray-200/70 bg-white p-6 dark:border-gray-800/70">
-            <SectionLabel icon={Swords}>
+            <SectionLabel icon={Swords} tone="tone-rose">
               {matchup?.week ? `Week ${matchup.week} matchup` : "This week"}
             </SectionLabel>
             {matchup?.opponent_team ? (
               <div className="mt-5">
                 <div className="flex items-center justify-between">
                   <div className="flex-1 text-center">
-                    <p className="text-[11px] font-medium uppercase tracking-wider text-gray-400">
-                      You
-                    </p>
-                    <p className="mt-1 text-2xl font-extrabold tabular-nums text-gray-900 dark:text-gray-100">
+                    <p className="text-xs font-medium text-gray-500">You</p>
+                    <p className="mt-1.5 font-mono text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">
                       {formatRecord(
                         roster?.wins ?? 0,
                         roster?.losses ?? 0,
@@ -308,14 +328,14 @@ export default function DashboardPage() {
                       {roster?.points_for.toFixed(1)} PF
                     </p>
                   </div>
-                  <span className="px-3 text-xs font-bold text-gray-300 dark:text-gray-600">
+                  <span className="rounded-full border border-gray-200 px-2 py-0.5 font-mono text-[10px] font-medium text-gray-400">
                     VS
                   </span>
                   <div className="flex-1 text-center">
-                    <p className="truncate text-[11px] font-medium uppercase tracking-wider text-gray-400">
+                    <p className="truncate text-xs font-medium text-gray-500">
                       {matchup.opponent_team.owner_name ?? "Opp"}
                     </p>
-                    <p className="mt-1 text-2xl font-extrabold tabular-nums text-gray-900 dark:text-gray-100">
+                    <p className="mt-1.5 font-mono text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">
                       {formatRecord(
                         matchup.opponent_team.wins,
                         matchup.opponent_team.losses,
@@ -329,7 +349,7 @@ export default function DashboardPage() {
                 </div>
                 <Link
                   href="/matchup"
-                  className="mt-5 flex items-center justify-center gap-1 rounded-lg bg-gray-100 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  className="button-secondary mt-6 w-full"
                 >
                   See the matchup <ChevronRight className="h-4 w-4" />
                 </Link>
@@ -349,14 +369,14 @@ export default function DashboardPage() {
             {/* Game Plan — the accent moment */}
             <Link
               href="/gameplan"
-              className="group flex items-center gap-4 rounded-2xl bg-green-600 p-5 text-white shadow-md shadow-green-600/20 transition-all hover:bg-green-700"
+              className="stage group flex items-center gap-4 rounded-2xl p-5 transition-transform hover:-translate-y-0.5"
             >
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/15">
-                <Zap className="h-6 w-6" />
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 text-signal ring-1 ring-white/10">
+                <Zap className="h-5 w-5" />
               </div>
               <div className="flex-1">
-                <p className="text-base font-bold">Your weekly game plan</p>
-                <p className="text-sm text-green-50/90">
+                <p className="text-base font-semibold">Your weekly game plan</p>
+                <p className="mt-0.5 text-sm text-zinc-400">
                   Your lineup, the close calls, and what comes next.
                 </p>
               </div>
@@ -365,7 +385,7 @@ export default function DashboardPage() {
 
             {/* Injury report */}
             <div className="flex-1 rounded-2xl border border-gray-200/70 bg-white p-6 dark:border-gray-800/70">
-              <SectionLabel icon={Activity}>Injury report</SectionLabel>
+              <SectionLabel icon={Activity} tone="tone-amber">Injury report</SectionLabel>
               {injured && injured.length > 0 ? (
                 <ul className="mt-4 space-y-3">
                   {injured.slice(0, 4).map((p) => (
@@ -408,13 +428,13 @@ export default function DashboardPage() {
         {recSummary &&
           recSummary.wins + recSummary.losses + recSummary.pending > 0 && (
             <div className="mt-6 flex items-center gap-4 rounded-2xl border border-gray-200/70 bg-white px-6 py-4 dark:border-gray-800/70">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-green-100 dark:bg-green-900/40">
-                <Trophy className="h-5 w-5 text-green-700 dark:text-green-400" />
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft">
+                <Trophy className="h-5 w-5 text-accent" />
               </div>
               <div>
-                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                   AI start/sit record:{" "}
-                  <span className="tabular-nums">
+                  <span className="font-mono">
                     {recSummary.wins}-{recSummary.losses}
                     {recSummary.ties > 0 ? `-${recSummary.ties}` : ""}
                   </span>
@@ -432,15 +452,15 @@ export default function DashboardPage() {
 
         {/* ── Ask the AI ── */}
         <div className="mt-8">
-          <SectionLabel icon={MessageCircle}>Ask the AI</SectionLabel>
+          <SectionLabel icon={MessageCircle} tone="tone-violet">Ask the AI</SectionLabel>
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            {quickAsks.map(({ q, icon: Icon }) => (
+            {quickAsks.map(({ q, icon: Icon, tone }) => (
               <button
                 key={q}
                 onClick={() => router.push(`/chat?q=${encodeURIComponent(q)}`)}
-                className="group flex items-center gap-3 rounded-2xl border border-gray-200/70 bg-white p-4 text-left transition-all hover:border-green-300 hover:shadow-sm dark:border-gray-800/70 dark:hover:border-green-700/60"
+                className={`${tone} group flex items-center gap-3 rounded-2xl border border-gray-200/70 bg-white p-4 text-left transition-all hover:-translate-y-0.5 hover:border-[rgb(var(--tone)/0.45)] hover:shadow-[0_0_0_3px_rgb(var(--tone)/0.1)] dark:border-gray-800/70`}
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-100 text-green-700 transition-colors group-hover:bg-green-600 group-hover:text-white dark:bg-green-900/40 dark:text-green-400">
+                <div className="tone-chip h-9 w-9">
                   <Icon className="h-4 w-4" />
                 </div>
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
@@ -455,7 +475,7 @@ export default function DashboardPage() {
         {standings && standings.length > 0 && (
           <div className="mt-8 overflow-hidden rounded-2xl border border-gray-200/70 bg-white dark:border-gray-800/70">
             <div className="border-b border-gray-100 px-6 py-4 dark:border-gray-800">
-              <SectionLabel icon={Crown}>Standings</SectionLabel>
+              <SectionLabel icon={Crown} tone="tone-amber">Standings</SectionLabel>
             </div>
             <div className="divide-y divide-gray-50 dark:divide-gray-800/50">
               {standings.map((s, i) => {
@@ -465,14 +485,14 @@ export default function DashboardPage() {
                     key={s.team_id}
                     className={`flex items-center gap-4 px-6 py-3 transition-colors ${
                       isUser
-                        ? "bg-green-50/70 dark:bg-green-950/30"
+                        ? "bg-accent-soft/60 shadow-[inset_2px_0_0_rgb(var(--accent))]"
                         : "hover:bg-gray-50/50 dark:hover:bg-gray-800/30"
                     }`}
                   >
                     <span
-                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold tabular-nums ${
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg font-mono text-xs font-semibold ${
                         i === 0
-                          ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-400"
+                          ? "bg-signal text-zinc-900"
                           : "bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500"
                       }`}
                     >
@@ -482,22 +502,22 @@ export default function DashboardPage() {
                       <p
                         className={`truncate text-sm font-semibold ${
                           isUser
-                            ? "text-green-700 dark:text-green-400"
+                            ? "text-accent-ink"
                             : "text-gray-900 dark:text-gray-100"
                         }`}
                       >
                         {s.owner_name ?? `Team ${s.team_id}`}
                         {isUser && (
-                          <span className="ml-1.5 text-xs font-normal text-green-500">
-                            you
+                          <span className="ml-2 rounded-full bg-accent px-1.5 py-px text-[10px] font-semibold text-accent-fg">
+                            You
                           </span>
                         )}
                       </p>
                     </div>
-                    <span className="text-sm font-bold tabular-nums text-gray-700 dark:text-gray-200">
+                    <span className="font-mono text-sm font-medium text-gray-700 dark:text-gray-200">
                       {formatRecord(s.wins, s.losses, s.ties)}
                     </span>
-                    <span className="w-20 text-right text-xs tabular-nums text-gray-400">
+                    <span className="w-20 text-right font-mono text-xs text-gray-400">
                       {s.points_for.toFixed(1)} PF
                     </span>
                   </div>

@@ -9,7 +9,7 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
       <span
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-          isUser ? "bg-gray-200 text-gray-600" : "bg-green-600 text-white"
+          isUser ? "bg-gray-100 text-gray-600" : "bg-[rgb(var(--stage))] text-signal ring-1 ring-white/10"
         }`}
       >
         {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
@@ -17,7 +17,7 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
       <div
         className={`min-w-0 max-w-[90%] sm:max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
           isUser
-            ? "rounded-tr-sm bg-green-600 text-white"
+            ? "rounded-tr-sm bg-accent text-accent-fg"
             : "rounded-tl-sm border border-gray-200 bg-white text-gray-900"
         }`}
       >

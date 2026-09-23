@@ -112,7 +112,7 @@ export default function BettingPage() {
           <button
             onClick={breakdown}
             disabled={busy || games.length === 0}
-            className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-fg hover:bg-accent-hover disabled:opacity-50"
           >
             <Sparkles className="h-4 w-4" />
             {busy ? "Analyzing…" : "AI breakdown"}
@@ -134,7 +134,7 @@ export default function BettingPage() {
         )}
 
         {analysis && (
-          <div className="prose-sm mt-6 rounded-xl border border-green-200 bg-green-50 p-6 text-sm leading-relaxed">
+          <div className="prose-sm mt-6 rounded-xl callout p-6 text-sm leading-relaxed">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {analysis}
             </ReactMarkdown>
@@ -195,7 +195,7 @@ export default function BettingPage() {
 
               <div className="mt-3 grid gap-4 text-sm sm:grid-cols-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  <p className="text-xs font-semibold text-gray-400">
                     Moneyline
                   </p>
                   {[g.away_team, g.home_team].map((t) => {
@@ -223,7 +223,7 @@ export default function BettingPage() {
                 </div>
 
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  <p className="text-xs font-semibold text-gray-400">
                     Spread
                   </p>
                   {[g.away_team, g.home_team].map((t) => {
@@ -251,7 +251,7 @@ export default function BettingPage() {
                 </div>
 
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  <p className="text-xs font-semibold text-gray-400">
                     Total
                   </p>
                   {(["over", "under"] as const).map((side) => {

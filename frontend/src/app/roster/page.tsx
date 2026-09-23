@@ -76,7 +76,7 @@ export default function RosterPage() {
         {roster && (roster.starters.length > 0 || roster.bench.length > 0) && (
           <div className="mt-6 grid gap-8 lg:grid-cols-2">
             <section>
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              <h2 className="text-sm font-semibold text-gray-900">
                 Starters
               </h2>
               <div className="mt-3 space-y-2">
@@ -92,7 +92,7 @@ export default function RosterPage() {
               </div>
             </section>
             <section>
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              <h2 className="text-sm font-semibold text-gray-900">
                 Bench
               </h2>
               <div className="mt-3 space-y-2">
@@ -137,7 +137,7 @@ export default function RosterPage() {
                 </button>
               </div>
               <div className="mt-4">
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <h4 className="text-xs font-semibold text-gray-500">
                   Recent fantasy points (PPR)
                 </h4>
                 <div className="mt-2">

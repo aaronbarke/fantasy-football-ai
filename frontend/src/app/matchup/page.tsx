@@ -127,7 +127,7 @@ function PlayerSide({
         return (
           <div className="w-14 shrink-0 text-center">
             <div
-              className={`text-base font-extrabold tabular-nums ${
+              className={`text-base font-mono font-semibold tracking-tight ${
                 win ? "text-green-600 dark:text-green-400" : "text-gray-400"
               }`}
             >
@@ -161,12 +161,12 @@ function OddsChart({ points }: { points: OddsPoint[] }) {
   }));
   return (
     <div className="mt-6">
-      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+      <p className="mb-1 text-xs font-semibold text-gray-400">
         Your win probability today
       </p>
       <ResponsiveContainer width="100%" height={150}>
         <LineChart data={data} margin={{ top: 6, right: 10, bottom: 0, left: -18 }}>
-          <ReferenceLine y={50} stroke="#9ca3af" strokeDasharray="3 3" />
+          <ReferenceLine y={50} stroke="#a1a1aa" strokeDasharray="3 3" />
           <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#9ca3af" }} stroke="#9ca3af" minTickGap={28} />
           <YAxis
             domain={[0, 100]}
@@ -182,7 +182,7 @@ function OddsChart({ points }: { points: OddsPoint[] }) {
           <Line
             type="monotone"
             dataKey="you"
-            stroke="#16a34a"
+            stroke="#3b6af0"
             strokeWidth={2}
             dot={false}
             isAnimationActive={false}
@@ -202,7 +202,7 @@ function BenchColumn({
 }) {
   return (
     <div className="rounded-xl border border-gray-200/70 bg-white p-3 dark:border-gray-800/70">
-      <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-gray-300 dark:text-gray-600">
+      <p className="mb-2 font-medium text-xs text-gray-300 dark:text-gray-600">
         {title}
       </p>
       {(players ?? []).length === 0 ? (
@@ -319,7 +319,7 @@ export default function MatchupPage() {
             </button>
             <Link
               href={`/chat?q=${encodeURIComponent("Break down my matchup this week")}`}
-              className="flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-fg hover:bg-accent-hover"
             >
               <Sparkles className="h-4 w-4" /> Get a matchup breakdown
             </Link>
@@ -343,10 +343,10 @@ export default function MatchupPage() {
             <div className="mt-6 rounded-2xl border border-gray-200/70 bg-white p-6 dark:border-gray-800/70">
               <div className="flex items-end justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-green-600 dark:text-green-400">
+                  <p className="text-xs font-semibold text-accent-ink">
                     You · {data.user.record}
                   </p>
-                  <p className="mt-1 text-4xl font-extrabold tabular-nums text-gray-900 dark:text-gray-100">
+                  <p className="mt-1 text-4xl font-mono font-semibold tracking-tight text-gray-900 dark:text-gray-100">
                     {(data.live
                       ? data.user.current_points ?? 0
                       : data.user.projected_total
@@ -369,10 +369,10 @@ export default function MatchupPage() {
                   </span>
                 )}
                 <div className="text-right">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  <p className="text-xs font-semibold text-gray-400">
                     {oppName} · {data.opponent.record}
                   </p>
-                  <p className="mt-1 text-4xl font-extrabold tabular-nums text-gray-900 dark:text-gray-100">
+                  <p className="mt-1 text-4xl font-mono font-semibold tracking-tight text-gray-900 dark:text-gray-100">
                     {(data.live
                       ? data.opponent.current_points ?? 0
                       : data.opponent.projected_total
@@ -390,7 +390,7 @@ export default function MatchupPage() {
               {winPct != null && (
                 <div className="mt-5">
                   <div className="mb-1 flex justify-between text-xs font-semibold">
-                    <span className="text-green-600 dark:text-green-400">
+                    <span className="text-accent-ink">
                       {winPct}% you
                     </span>
                     <span className="text-gray-400">
@@ -399,7 +399,7 @@ export default function MatchupPage() {
                   </div>
                   <div className="flex h-2.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
                     <div
-                      className="bg-green-500 transition-all"
+                      className="rounded-full bg-gradient-to-r from-accent to-violet-500 transition-all"
                       style={{ width: `${winPct}%` }}
                     />
                   </div>
@@ -432,7 +432,7 @@ export default function MatchupPage() {
                     key={i}
                     className="rounded-xl border border-gray-200/70 bg-white p-3 dark:border-gray-800/70"
                   >
-                    <div className="mb-1.5 text-center text-[10px] font-bold uppercase tracking-widest">
+                    <div className="mb-1.5 font-medium text-center text-xs">
                       {r.slot.includes("FLEX") ? (
                         <span className="bg-gradient-to-r from-blue-500 via-green-500 to-orange-500 bg-clip-text text-transparent">
                           FLEX

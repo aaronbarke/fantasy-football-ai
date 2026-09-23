@@ -174,7 +174,7 @@ function EspnEdgeBadge({ edge }: { edge: number | null }) {
   return (
     <span
       title={`Sharp drafters take him ~${Math.round(edge)} picks earlier than ESPN, so he falls to you if your league drafts off ESPN`}
-      className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"
+      className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-bold text-accent-ink"
     >
       ESPN value +{Math.round(edge)}
     </span>
@@ -508,7 +508,7 @@ export default function DraftPage() {
               Find your next pick. Track who’s available, compare value, and
               build your roster.
             </p>
-            <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-green-700">
+            <p className="mt-3 inline-flex rounded-md border border-gray-200 bg-white px-2 py-0.5 font-mono text-[11px] uppercase text-gray-500">
               {(data?.scoring ?? "ppr").replace("_", "-")} ·{" "}
               {data?.league_size ?? teams} teams
             </p>
@@ -530,7 +530,7 @@ export default function DraftPage() {
           <div
             className={`mt-5 flex flex-wrap items-center gap-3 rounded-xl border p-4 ${
               liveActive
-                ? "border-green-300 bg-green-50 dark:border-green-500/40"
+                ? "border-accent-line bg-accent-soft/50"
                 : "border-gray-200 bg-white"
             }`}
           >
@@ -542,7 +542,7 @@ export default function DraftPage() {
                 }}
                 className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold ${
                   liveSync
-                    ? "bg-green-600 text-white hover:bg-green-700"
+                    ? "bg-accent text-accent-fg hover:bg-accent-hover"
                     : "border border-gray-300 hover:bg-gray-100"
                 }`}
               >
@@ -555,7 +555,7 @@ export default function DraftPage() {
                 onClick={() => setDemoPicks((p) => (p > 0 ? 0 : 1))}
                 className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold ${
                   demoMode
-                    ? "bg-green-600 text-white hover:bg-green-700"
+                    ? "bg-accent text-accent-fg hover:bg-accent-hover"
                     : "border border-gray-300 hover:bg-gray-100"
                 }`}
               >
@@ -605,8 +605,8 @@ export default function DraftPage() {
         <div
           className={`mt-5 rounded-xl border p-4 ${
             externalSync
-              ? "border-indigo-300 bg-indigo-50 dark:border-indigo-500/40 dark:bg-indigo-500/5"
-              : "border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
+              ? "border-accent-line bg-accent-soft/50"
+              : "border-gray-200 bg-white"
           }`}
         >
           <div className="flex flex-wrap items-center gap-3">
@@ -628,13 +628,13 @@ export default function DraftPage() {
                 value={externalInput}
                 onChange={(e) => setExternalInput(e.target.value)}
                 disabled={externalSync}
-                className="w-56 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm placeholder:text-gray-400 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                className="w-56 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm placeholder:text-gray-400 disabled:opacity-50 dark:text-gray-100"
               />
               {!externalSync ? (
                 <button
                   type="submit"
                   disabled={!externalInput.trim()}
-                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                  className="rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:bg-accent-hover disabled:opacity-50"
                 >
                   Sync
                 </button>
@@ -719,7 +719,7 @@ export default function DraftPage() {
             </span>
             <span className="text-gray-500">{totalPicked} off the board</span>
             {nextPick && (
-              <span className="rounded-lg bg-green-600 px-3 py-1 font-semibold text-white">
+              <span className="rounded-lg bg-accent px-3 py-1 font-semibold text-accent-fg">
                 You pick #{nextPick}
                 {followingPick ? ` · then #${followingPick}` : ""}
               </span>
@@ -738,7 +738,7 @@ export default function DraftPage() {
                     onClick={() => setFilter(p)}
                     className={`rounded-full px-3 py-1 text-xs font-semibold ${
                       filter === p
-                        ? "bg-green-600 text-white"
+                        ? "bg-ink text-canvas"
                         : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                     }`}
                   >
@@ -785,7 +785,7 @@ export default function DraftPage() {
                     {tierBreak && filter !== "ALL" && (
                       <div className="my-2 flex items-center gap-2">
                         <div className="h-px flex-1 bg-gray-200" />
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                        <span className="text-xs font-semibold text-gray-400">
                           Tier {p.tier}
                         </span>
                         <div className="h-px flex-1 bg-gray-200" />
@@ -836,7 +836,7 @@ export default function DraftPage() {
                               target="_blank"
                               rel="noreferrer"
                               title={`${news[0].headline} · ${timeAgo(news[0].published_at)}`}
-                              className="text-gray-400 hover:text-green-600"
+                              className="text-gray-400 hover:text-accent"
                             >
                               <Newspaper className="h-3.5 w-3.5" />
                             </a>
@@ -846,7 +846,7 @@ export default function DraftPage() {
                           {p.team ?? "FA"}
                           {p.bye_week ? ` · bye ${p.bye_week}` : ""} ·{" "}
                           {p.proj_points} proj ·{" "}
-                          <span className="font-semibold text-green-700 dark:text-green-400">
+                          <span className="font-semibold text-accent-ink">
                             {p.vor} VOR
                           </span>
                           {p.adp ? ` · ADP ${p.adp}` : ""}
@@ -864,7 +864,7 @@ export default function DraftPage() {
                         <>
                           <button
                             onClick={() => mark(p.player_id, "me")}
-                            className="rounded-md bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700"
+                            className="rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-accent-fg hover:bg-accent-hover"
                           >
                             My pick
                           </button>
@@ -886,7 +886,7 @@ export default function DraftPage() {
           {/* Recommendations + roster */}
           <div className="min-w-0 space-y-4">
             <div className="rounded-xl border border-gray-200 bg-white p-5">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              <h2 className="text-sm font-semibold text-gray-900">
                 Best available{nextPick ? ` at #${nextPick}` : ""}
               </h2>
               {recLoading && (
@@ -908,7 +908,7 @@ export default function DraftPage() {
                       {!liveActive && (
                         <button
                           onClick={() => mark(r.player_id, "me")}
-                          className="rounded-md bg-green-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-green-700"
+                          className="rounded-md bg-accent px-2 py-0.5 text-[11px] font-semibold text-accent-fg hover:bg-accent-hover"
                         >
                           Take
                         </button>
@@ -932,7 +932,7 @@ export default function DraftPage() {
             {/* Live draft feed — what just came off the board in the real draft */}
             {liveActive && livePickFeed.length > 0 && (
               <div className="rounded-xl border border-gray-200 bg-white p-5">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+                <h2 className="text-sm font-semibold text-gray-900">
                   Draft feed
                 </h2>
                 <ul className="mt-3 space-y-1.5">
@@ -969,7 +969,7 @@ export default function DraftPage() {
             )}
 
             <div className="rounded-xl border border-gray-200 bg-white p-5">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              <h2 className="text-sm font-semibold text-gray-900">
                 Your roster ({myPlayers.length})
               </h2>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1025,14 +1025,14 @@ export default function DraftPage() {
             <button
               onClick={askAI}
               disabled={busy}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg hover:bg-accent-hover disabled:opacity-50"
             >
               <Sparkles className="h-4 w-4" />
               {busy ? "Thinking…" : "Who should I take?"}
             </button>
 
             {advice && (
-              <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm leading-relaxed">
+              <div className="rounded-xl callout p-4 text-sm leading-relaxed">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {advice}
                 </ReactMarkdown>
