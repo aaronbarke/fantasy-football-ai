@@ -23,6 +23,7 @@ interface PlanPlayer {
   ceiling: number | null;
   confidence: string | null;
   opponent: string | null;
+  bye?: boolean;
   matchup_adj: number | null;
   vegas_adj: number | null;
 }
@@ -150,8 +151,8 @@ function PlayerRow({ p, slot }: { p: PlanPlayer | null; slot?: string }) {
           </p>
           <p className="text-xs text-gray-500">
             {p.team ?? "FA"}
-            {p.opponent ? ` vs ${p.opponent}` : ""}
-            {p.confidence ? ` · ${p.confidence} confidence` : ""}
+            {p.bye ? " · BYE" : p.opponent ? ` vs ${p.opponent}` : ""}
+            {p.confidence && !p.bye ? ` · ${p.confidence} confidence` : ""}
           </p>
         </div>
         <div className="text-right">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Navbar from "@/components/Navbar";
 import PageHeader from "@/components/PageHeader";
 import { api } from "@/lib/api";
@@ -26,9 +26,12 @@ function PlayerSearchAdd({
 }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<PlayerCard[]>([]);
+  // Responses can land out of order while typing; only the newest one counts.
+  const latestQuery = useRef("");
 
   async function search(value: string) {
     setQ(value);
+    latestQuery.current = value;
     if (value.length < 2) {
       setResults([]);
       return;
@@ -42,6 +45,7 @@ function PlayerSearchAdd({
           team: string | null;
         }[]
       >(`/api/players/search?q=${encodeURIComponent(value)}`);
+      if (latestQuery.current !== value) return;
       setResults(
         found
           .filter((p) => !exclude.includes(p.id))
@@ -54,7 +58,7 @@ function PlayerSearchAdd({
           })),
       );
     } catch {
-      setResults([]);
+      if (latestQuery.current === value) setResults([]);
     }
   }
 
@@ -189,6 +193,7 @@ type FinderPlayer = {
   value: number | null;
   ppg: number | null;
   trend: string | null;
+  injury_status?: string | null;
 };
 
 type FinderTrade = {
@@ -200,12 +205,20 @@ type FinderTrade = {
   value_gap: number;
   your_lineup_gain: number;
   their_lineup_gain: number;
+  you_drop?: FinderPlayer[];
+  they_drop?: FinderPlayer[];
   rationale: string;
 };
 
 function playerLabel(players: FinderPlayer[]): string {
   return players
-    .map((p) => `${p.name} (${p.position ?? "?"}${p.team ? ` · ${p.team}` : ""})`)
+    .map(
+      (p) =>
+        `${p.name} (${p.position ?? "?"}${p.team ? ` · ${p.team}` : ""})` +
+        (p.injury_status && p.injury_status.toLowerCase() !== "active"
+          ? ` [${p.injury_status}]`
+          : ""),
+    )
     .join(" + ");
 }
 
@@ -378,6 +391,19 @@ export default function TradePage() {
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-gray-500">{t.rationale}</p>
+                  {((t.you_drop?.length ?? 0) > 0 ||
+                    (t.they_drop?.length ?? 0) > 0) && (
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                      Roster spot:{" "}
+                      {(t.you_drop?.length ?? 0) > 0 &&
+                        `you'd cut ${t.you_drop!.map((p) => p.name).join(", ")}`}
+                      {(t.you_drop?.length ?? 0) > 0 &&
+                        (t.they_drop?.length ?? 0) > 0 &&
+                        "; "}
+                      {(t.they_drop?.length ?? 0) > 0 &&
+                        `${t.partner.owner_name} would cut ${t.they_drop!.map((p) => p.name).join(", ")}`}
+                    </p>
+                  )}
                   <button
                     onClick={() => loadIntoAnalyzer(t)}
                     className="mt-2 text-xs font-semibold text-accent-ink hover:underline"

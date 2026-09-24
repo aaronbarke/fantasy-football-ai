@@ -370,7 +370,13 @@ export default function DraftPage() {
     () => Object.keys(drafted).filter((id) => drafted[id] === "me"),
     [drafted],
   );
-  const totalPicked = Object.keys(drafted).length;
+  // In live mode count every pick the feed says was made — including ones we
+  // couldn't match to a player — or the next-pick math drifts behind the
+  // real draft. Mapped ids still decide who's off the board.
+  const totalPicked =
+    liveActive && live
+      ? Math.max(live.picks_made, Object.keys(drafted).length)
+      : Object.keys(drafted).length;
 
   // Most recent completed picks from the live feed, newest first, with names
   // resolved off the board so we can show "Team 7 took CeeDee Lamb".

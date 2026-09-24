@@ -90,7 +90,8 @@ export async function apiStream(
   path: string,
   body: unknown,
   onChunk: (text: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  retry = true
 ): Promise<void> {
   const token = getToken();
   const resp = await fetch(`${API_URL}${path}`, {
@@ -102,12 +103,21 @@ export async function apiStream(
     body: JSON.stringify(body),
     signal,
   });
+  // Same expired-token handling as api(): refresh once and replay, so a chat
+  // left open past the access token's lifetime keeps working.
+  if (resp.status === 401 && retry && (await tryRefresh())) {
+    return apiStream(path, body, onChunk, signal, false);
+  }
   if (!resp.ok || !resp.body) {
     let detail = resp.statusText;
     try {
       detail = (await resp.json()).detail || detail;
     } catch {
       /* non-JSON */
+    }
+    if (resp.status === 401 && typeof window !== "undefined") {
+      clearTokens();
+      window.location.href = "/login";
     }
     throw new ApiError(resp.status, detail);
   }

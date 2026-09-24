@@ -123,9 +123,12 @@ export default function DashboardPage() {
     enabled: !!league,
   });
 
+  // ESPN's injury feed also lists players cleared to play as "Active".
   const injured =
     roster &&
-    [...roster.starters, ...roster.bench].filter((p) => p.injury_status);
+    [...roster.starters, ...roster.bench].filter(
+      (p) => p.injury_status && p.injury_status.toLowerCase() !== "active",
+    );
 
   const rank =
     standings && roster

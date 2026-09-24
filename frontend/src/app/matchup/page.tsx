@@ -15,7 +15,7 @@ import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { EmptyState, LoadingState, ErrorState } from "@/components/PageState";
 import InjuryBadge from "@/components/InjuryBadge";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import PlayerAvatar from "@/components/PlayerAvatar";
 import { positionColor } from "@/lib/utils";
@@ -31,6 +31,7 @@ interface MPlayer {
   actual_points?: number | null;
   confidence?: string | null;
   opponent?: string | null;
+  bye?: boolean;
 }
 interface MRow {
   slot: string;
@@ -118,7 +119,7 @@ function PlayerSide({
         </div>
         <p className="text-xs text-gray-400">
           {p.team}
-          {p.opponent ? ` · vs ${p.opponent}` : ""}
+          {p.bye ? " · BYE" : p.opponent ? ` · vs ${p.opponent}` : ""}
         </p>
       </div>
       {(() => {
@@ -234,6 +235,10 @@ export default function MatchupPage() {
   const { league } = useLeague();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  // Live refresh is disabled for some accounts (the shared demo); stop polling
+  // instead of failing every 45 seconds.
+  const [refreshBlocked, setRefreshBlocked] = useState(false);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["matchup-preview", league?.id],
@@ -267,6 +272,12 @@ export default function MatchupPage() {
       await queryClient.invalidateQueries({
         queryKey: ["matchup-odds", league.id],
       });
+      setRefreshError(null);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) setRefreshBlocked(true);
+      setRefreshError(
+        err instanceof Error ? err.message : "Couldn't refresh live scores",
+      );
     } finally {
       setRefreshing(false);
     }
@@ -275,12 +286,12 @@ export default function MatchupPage() {
   // While the matchup is live, pull live scores right away and then on a gentle
   // poll so the score, per-player points, and odds keep updating.
   useEffect(() => {
-    if (!league || !live) return;
+    if (!league || !live || refreshBlocked) return;
     void refresh();
     const id = setInterval(() => void refresh(), POLL_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [league?.id, live]);
+  }, [league?.id, live, refreshBlocked]);
 
   const ready =
     data?.status === "ok" && data.user && data.opponent && data.rows;
@@ -311,7 +322,8 @@ export default function MatchupPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={refresh}
-              disabled={refreshing || !league}
+              disabled={refreshing || !league || refreshBlocked}
+              title={refreshError ?? undefined}
               className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
               <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
@@ -326,6 +338,11 @@ export default function MatchupPage() {
           </div>
         </div>
 
+        {refreshError && (
+          <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+            {refreshError}
+          </p>
+        )}
         {isLoading && <LoadingState label="Comparing the lineups…" />}
         {error && <ErrorState retry={() => void refetch()} />}
         {!isLoading && !error && !ready && (
