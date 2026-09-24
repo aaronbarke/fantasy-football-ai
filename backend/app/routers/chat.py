@@ -56,7 +56,15 @@ async def _load_history(
         ChatMessage.connection_id == conn.id if conn else ChatMessage.connection_id.is_(None)
     )
     rows = (
-        (await db.execute(query.order_by(ChatMessage.created_at.desc()).limit(HISTORY_TURNS)))
+        # A turn's question and answer share one timestamp, so the id keeps
+        # them in order.
+        (
+            await db.execute(
+                query.order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc()).limit(
+                    HISTORY_TURNS
+                )
+            )
+        )
         .scalars()
         .all()
     )
@@ -132,7 +140,7 @@ async def _store_turn(
                 Recommendation(
                     user_id=user.id,
                     connection_id=conn.id if conn else None,
-                    season=get_settings().current_season,
+                    season=conn.season if conn else get_settings().current_season,
                     week=week,
                     picked_player_id=picked["id"],
                     alternative_player_id=alternative["id"],
@@ -217,7 +225,13 @@ async def chat_history(
         except ValueError:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid connection id")
     rows = (
-        (await db.execute(query.order_by(ChatMessage.created_at.desc()).limit(min(limit, 200))))
+        (
+            await db.execute(
+                query.order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc()).limit(
+                    min(limit, 200)
+                )
+            )
+        )
         .scalars()
         .all()
     )

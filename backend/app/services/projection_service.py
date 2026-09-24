@@ -1,8 +1,9 @@
 """Weekly point projection engine.
 
-Projects PPR points for a player's next game by combining three signals:
+Projects fantasy points (in the league's scoring format) for a player's game in
+the current NFL week by combining three signals:
 
-1. Baseline — recency-weighted PPR points per game over the last two seasons
+1. Baseline — recency-weighted points per game over the last two seasons
    (same blend the trade-value model uses: latest season ~2x the prior one,
    and the most recent 4 weeks double again).
 2. Matchup — the opponent defense's points allowed to the player's position
@@ -14,11 +15,14 @@ Projects PPR points for a player's next game by combining three signals:
 Floor/ceiling come from the player's own week-to-week volatility (stdev),
 so a boom/bust receiver shows a wide band while a target-hog shows a
 narrow one. Confidence reflects sample size and volatility.
+
+Players who can't score this week — on bye, not on an NFL roster, or ruled
+out — project to exactly 0 so no lineup or live total counts them.
 """
 
 import math
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +35,11 @@ from app.services.opportunity_service import (
     _is_absent,
     compute_opportunity_shares,
 )
-from app.services.schedule_service import defense_vs_position_ranks
+from app.services.schedule_service import (
+    current_nfl_week,
+    defense_vs_position_ranks,
+    points_column,
+)
 
 PRIOR_SEASON_WEIGHT = 0.5
 RECENT_WINDOW = 4
@@ -40,6 +48,15 @@ LEAGUE_AVG_TEAM_TOTAL = 22.5
 VEGAS_PCT_PER_POINT = 0.02  # ±2% projection per implied point above/below avg
 VEGAS_ADJ_CAP = 0.15
 PROJECTABLE = {"QB", "RB", "WR", "TE"}
+# Fewer games than this and our own model has nothing stable to stand on.
+MIN_SAMPLES = 3
+# Rookies / early-season call-ups with too little history lean entirely on
+# Sleeper's weekly number; this is the band width we give that number.
+THIN_SAMPLE_CV = 0.45
+# Kickers: projecting them individually is noise, so every healthy kicker with a
+# game gets the league-average starting output and a typical week-to-week band.
+K_BASELINE = 8.0
+K_STDEV = 4.0
 
 # Blend weight on Sleeper's weekly projection. It starts even with our model
 # early in the week and ramps up toward kickoff, because Sleeper's number is the
@@ -192,10 +209,38 @@ def win_probability(team_a_total: float, team_a_var: float, team_b_total: float,
     return 0.5 * (1 + _erf(diff / (sigma * math.sqrt(2))))
 
 
+def _inactive_package(reason: str, week: int | None, base_ppg: float | None = None) -> dict:
+    """A player who can't score this week (bye / no NFL team): a hard zero."""
+    return {
+        "projected": 0.0,
+        "floor": 0.0,
+        "ceiling": 0.0,
+        "confidence": "high",
+        "stdev": 0.0,
+        "bye": reason == "bye",
+        "inactive_reason": reason,
+        "boost_reason": None,
+        "defense_reason": None,
+        "components": {
+            "base_ppg": round(base_ppg, 1) if base_ppg is not None else None,
+            "matchup_adj": 0.0,
+            "vegas_adj": 0.0,
+            "weather_adj": 0.0,
+            "opportunity_adj": 0.0,
+            "defense_injury_adj": 0.0,
+            "external_proj": None,
+            "opponent": None,
+            "week": week,
+            "home": None,
+        },
+    }
+
+
 async def compute_projections(
-    db: AsyncSession, player_ids: list[str], season: int
+    db: AsyncSession, player_ids: list[str], season: int, scoring: str = "ppr"
 ) -> dict[str, dict]:
-    """player_id → projection package. Players without enough data are omitted."""
+    """player_id → projection package for the current NFL week, in the league's
+    scoring format. Players without enough data are omitted."""
     if not player_ids:
         return {}
 
@@ -203,19 +248,19 @@ async def compute_projections(
         (await db.execute(select(Player).where(Player.id.in_(player_ids)))).scalars().all()
     )
     players = [p for p in all_players if p.position in PROJECTABLE]
-    # Team defenses are projected separately (matchup-driven, no box-score
-    # history), so keep them aside rather than dropping them.
+    # Team defenses and kickers are projected separately (no box-score model),
+    # so keep them aside rather than dropping them.
     dst_players = [p for p in all_players if p.position == "DEF"]
-    if not players and not dst_players:
+    kickers = [p for p in all_players if p.position == "K"]
+    if not players and not dst_players and not kickers:
         return {}
     ids = [p.id for p in players]
 
     latest_season = (
         await db.execute(select(func.max(PlayerStatsWeekly.season)))
     ).scalar()
-    if latest_season is None and not dst_players:
-        return {}
 
+    points_col = points_column(scoring)
     rows = []
     if ids and latest_season is not None:
         rows = (
@@ -224,12 +269,12 @@ async def compute_projections(
                     PlayerStatsWeekly.player_id,
                     PlayerStatsWeekly.season,
                     PlayerStatsWeekly.week,
-                    PlayerStatsWeekly.fantasy_points_ppr,
+                    points_col.label("pts"),
                 ).where(
                     PlayerStatsWeekly.player_id.in_(ids),
                     PlayerStatsWeekly.season >= latest_season - 1,
                     PlayerStatsWeekly.week <= REGULAR_SEASON_MAX_WEEK,
-                    PlayerStatsWeekly.fantasy_points_ppr.is_not(None),
+                    points_col.is_not(None),
                 )
             )
         ).all()
@@ -240,14 +285,14 @@ async def compute_projections(
     per_player: dict[str, list[tuple[float, float]]] = defaultdict(list)  # (pts, weight)
     for r in rows:
         if r.season == latest_season:
-            w = 2.0 if r.week >= recent_cutoff else 1.0
+            w = 2.0 if r.week > recent_cutoff else 1.0
         else:
             w = PRIOR_SEASON_WEIGHT
-        per_player[r.player_id].append((float(r.fantasy_points_ppr), w))
+        per_player[r.player_id].append((float(r.pts), w))
 
     # Opponent + game environment lookups
     dvp = (
-        await defense_vs_position_ranks(db, int(latest_season))
+        await defense_vs_position_ranks(db, int(latest_season), scoring)
         if latest_season is not None
         else {}
     )
@@ -258,8 +303,16 @@ async def compute_projections(
         vals = [v["pts_allowed_avg"] for (_, p), v in dvp.items() if p == pos]
         league_avg_by_pos[pos] = sum(vals) / len(vals) if vals else 0.0
 
-    teams = {p.team for p in (players + dst_players) if p.team}
+    # Naive UTC to match the DB's naive game_time.
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    teams = {p.team for p in all_players if p.team}
+    # The active NFL week comes from the WHOLE schedule, not just these teams'
+    # games — otherwise a team on bye would skip straight to next week.
+    current_week = await current_nfl_week(db, season, now)
     next_opponent: dict[str, dict] = {}
+    bye_teams: set[str] = set()
+    implied: dict[tuple[str, int], float] = {}
+    gc_by_team_week: dict[tuple[str, int], GameCondition] = {}
     if teams:
         games = (
             await db.execute(
@@ -274,18 +327,11 @@ async def compute_projections(
                 .order_by(NflSchedule.week.asc())
             )
         ).scalars().all()
-        # "Next" game = the current NFL week onward, not Week 1. The active week
-        # is the earliest whose games aren't all finished (~4h past kickoff).
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        last_kick: dict[int, datetime] = {}
         for g in games:
-            if g.game_time and (g.week not in last_kick or g.game_time > last_kick[g.week]):
-                last_kick[g.week] = g.game_time
-        unfinished = [w for w, k in last_kick.items() if k + timedelta(hours=4) > now]
-        current_week = min(unfinished) if unfinished else (max(last_kick) if last_kick else None)
-        for g in games:
-            if current_week is not None and g.week < current_week:
-                continue  # skip past weeks so we don't show a stale opponent
+            # This week's game only. With no kickoff times at all we can't tell
+            # which week is live, so fall back to each team's first game.
+            if current_week is not None and g.week != current_week:
+                continue
             for team, opp, home in (
                 (g.home_team, g.away_team, True),
                 (g.away_team, g.home_team, False),
@@ -297,6 +343,9 @@ async def compute_projections(
                         "home": home,
                         "kickoff": g.game_time,
                     }
+        if current_week is not None:
+            # Every team plays in a loaded week except the ones on bye.
+            bye_teams = {t for t in teams if t not in next_opponent}
 
         conditions = (
             await db.execute(
@@ -309,24 +358,33 @@ async def compute_projections(
                 )
             )
         ).scalars().all()
-        implied: dict[str, float] = {}
-        gc_by_team_week: dict[tuple[str, int], GameCondition] = {}
+        # Keyed by (team, week): a team total is only meaningful for the game
+        # it was set for, never last week's line.
         for gc in conditions:
             if gc.implied_total_home is not None:
-                implied[gc.home_team] = float(gc.implied_total_home)
+                implied[(gc.home_team, gc.week)] = float(gc.implied_total_home)
             if gc.implied_total_away is not None:
-                implied[gc.away_team] = float(gc.implied_total_away)
+                implied[(gc.away_team, gc.week)] = float(gc.implied_total_away)
             gc_by_team_week[(gc.home_team, gc.week)] = gc
             gc_by_team_week[(gc.away_team, gc.week)] = gc
-    else:
-        implied = {}
-        gc_by_team_week = {}
 
-    # Sleeper weekly projections for the upcoming slate, to blend with our model
-    upcoming_weeks = [g["week"] for g in next_opponent.values()]
-    target_week = min(upcoming_weeks) if upcoming_weeks else None
+    def _unavailable(p: Player) -> str | None:
+        """Why a player can't score this week, if he can't."""
+        if not p.team:
+            # Only trust "no team" once we know the schedule — a bare player
+            # table (fresh install) shouldn't zero everybody.
+            return "no_team" if current_week is not None else None
+        if p.team in bye_teams:
+            return "bye"
+        return None
+
+    # Sleeper weekly projections for this week's slate, to blend with our model
+    target_week = current_week
+    if target_week is None:
+        upcoming_weeks = [g["week"] for g in next_opponent.values()]
+        target_week = min(upcoming_weeks) if upcoming_weeks else None
     external = (
-        await get_external_projections(season, target_week) if target_week else {}
+        await get_external_projections(season, target_week, scoring) if target_week else {}
     )
 
     # Teammate-injury opportunity: per team, work out how much target share an
@@ -340,14 +398,62 @@ async def compute_projections(
     opponents = {g["opponent"] for g in next_opponent.values() if g.get("opponent")}
     def_out_by_opp, alignment = await _defense_injury_context(db, opponents, ids)
 
-    # Naive UTC to match the DB's naive game_time for the kickoff ramp.
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-
     out: dict[str, dict] = {}
     for p in players:
         samples = per_player.get(p.id, [])
-        if len(samples) < 3:
+        game = next_opponent.get(p.team or "")
+        ext = external.get(p.id)
+
+        reason = _unavailable(p)
+        if reason:
+            base_ppg = (
+                sum(pts * w for pts, w in samples) / sum(w for _, w in samples)
+                if samples
+                else None
+            )
+            out[p.id] = _inactive_package(reason, current_week, base_ppg)
             continue
+
+        if len(samples) < MIN_SAMPLES:
+            # Too little history for our model (a rookie, a new starter early in
+            # the season). Sleeper still projects him, so use that instead of
+            # dropping him — otherwise the optimizer benches him by default and
+            # his team's projected total silently loses his points.
+            if ext is None:
+                continue
+            projected = max(0.0, float(ext))
+            sigma = max(projected * THIN_SAMPLE_CV, 1.0)
+            confidence = "low"
+            if _is_absent(p.injury_status):
+                projected, sigma, confidence = 0.0, 0.0, "high"
+            thin_base = (
+                sum(pts for pts, _ in samples) / len(samples) if samples else None
+            )
+            out[p.id] = {
+                "projected": round(projected, 1),
+                "floor": round(max(0.0, projected - 0.9 * sigma), 1),
+                "ceiling": round(projected + 1.1 * sigma, 1),
+                "confidence": confidence,
+                "stdev": round(sigma, 1),
+                "bye": False,
+                "inactive_reason": None,
+                "boost_reason": None,
+                "defense_reason": None,
+                "components": {
+                    "base_ppg": round(thin_base, 1) if thin_base is not None else None,
+                    "matchup_adj": 0.0,
+                    "vegas_adj": 0.0,
+                    "weather_adj": 0.0,
+                    "opportunity_adj": 0.0,
+                    "defense_injury_adj": 0.0,
+                    "external_proj": round(float(ext), 1),
+                    "opponent": game["opponent"] if game else None,
+                    "week": game["week"] if game else None,
+                    "home": game["home"] if game else None,
+                },
+            }
+            continue
+
         wsum = sum(w for _, w in samples)
         base = sum(pts * w for pts, w in samples) / wsum
         variance = sum(w * (pts - base) ** 2 for pts, w in samples) / wsum
@@ -355,7 +461,6 @@ async def compute_projections(
 
         matchup_adj = 0.0
         opponent = None
-        game = next_opponent.get(p.team or "")
         if game and p.position:
             opponent = game["opponent"]
             info = dvp.get((opponent, p.position))
@@ -367,8 +472,9 @@ async def compute_projections(
                 matchup_adj = (info["pts_allowed_avg"] - league_avg) * share * 0.5
 
         vegas_adj = 0.0
-        if p.team in implied:
-            pct = (implied[p.team] - LEAGUE_AVG_TEAM_TOTAL) * VEGAS_PCT_PER_POINT
+        team_total = implied.get((p.team, game["week"])) if game and p.team else None
+        if team_total is not None:
+            pct = (team_total - LEAGUE_AVG_TEAM_TOTAL) * VEGAS_PCT_PER_POINT
             pct = max(-VEGAS_ADJ_CAP, min(VEGAS_ADJ_CAP, pct))
             vegas_adj = base * pct
 
@@ -379,7 +485,6 @@ async def compute_projections(
             )
 
         model_proj = base + matchup_adj + vegas_adj + weather_adj
-        ext = external.get(p.id)
         if ext is not None:
             # Blend our model with Sleeper's weekly projection, leaning harder on
             # Sleeper as kickoff nears (it reflects late-breaking news).
@@ -448,6 +553,8 @@ async def compute_projections(
             "ceiling": round(projected + 1.1 * sigma, 1),
             "confidence": confidence,
             "stdev": round(sigma, 1),
+            "bye": False,
+            "inactive_reason": None,
             "boost_reason": boost_reason,
             "defense_reason": defense_reason,
             "components": {
@@ -466,9 +573,13 @@ async def compute_projections(
 
     # Team defenses: matchup-driven projection off the opponent's implied total.
     for p in dst_players:
+        reason = _unavailable(p)
+        if reason:
+            out[p.id] = _inactive_package(reason, current_week, DST_BASELINE)
+            continue
         game = next_opponent.get(p.team or "")
         opponent = game["opponent"] if game else None
-        opp_implied = implied.get(opponent) if opponent else None
+        opp_implied = implied.get((opponent, game["week"])) if opponent else None
         gc = gc_by_team_week.get((p.team, game["week"])) if game else None
         proj, dst_weather, matchup_label = _dst_projection(opp_implied, gc)
         sigma = proj * DST_STDEV_FRAC
@@ -478,6 +589,8 @@ async def compute_projections(
             "ceiling": round(proj + sigma, 1),
             "confidence": "low",  # DST weeks are boom/bust
             "stdev": round(sigma, 1),
+            "bye": False,
+            "inactive_reason": None,
             "boost_reason": None,
             "defense_reason": (
                 f"{matchup_label} matchup vs {opponent} (implied {opp_implied:.0f})"
@@ -490,6 +603,35 @@ async def compute_projections(
                 "opponent": opponent,
                 "opponent_implied_total": round(opp_implied, 1) if opp_implied is not None else None,
                 "matchup": matchup_label,
+                "week": game["week"] if game else None,
+                "home": game["home"] if game else None,
+            },
+        }
+
+    # Kickers: a flat league-average week — but a kicker on bye or ruled out
+    # still has to project to zero, or he'd pad lineups and live totals.
+    for p in kickers:
+        reason = _unavailable(p)
+        if reason:
+            out[p.id] = _inactive_package(reason, current_week, K_BASELINE)
+            continue
+        game = next_opponent.get(p.team or "")
+        projected, sigma, confidence = K_BASELINE, K_STDEV, "low"
+        if _is_absent(p.injury_status):
+            projected, sigma, confidence = 0.0, 0.0, "high"
+        out[p.id] = {
+            "projected": projected,
+            "floor": round(max(0.0, projected - sigma), 1),
+            "ceiling": round(projected + sigma, 1),
+            "confidence": confidence,
+            "stdev": sigma,
+            "bye": False,
+            "inactive_reason": None,
+            "boost_reason": None,
+            "defense_reason": None,
+            "components": {
+                "base_ppg": K_BASELINE,
+                "opponent": game["opponent"] if game else None,
                 "week": game["week"] if game else None,
                 "home": game["home"] if game else None,
             },

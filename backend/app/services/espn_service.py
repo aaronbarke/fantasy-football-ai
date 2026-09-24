@@ -10,10 +10,12 @@ import httpx
 
 BASE_URL = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl"
 
-# ESPN lineup slot IDs → readable positions
+# ESPN lineup slot IDs → readable positions (Sleeper's names for the combo
+# slots, so both platforms share one lineup vocabulary). 3 = RB/WR, 5 = WR/TE,
+# 7 = OP (superflex); without them those slots silently vanish from the lineup.
 SLOT_MAP = {
-    0: "QB", 2: "RB", 4: "WR", 6: "TE", 16: "DEF", 17: "K",
-    20: "BN", 21: "IR", 23: "FLEX",
+    0: "QB", 2: "RB", 3: "WRRB_FLEX", 4: "WR", 5: "REC_FLEX", 6: "TE",
+    7: "SUPER_FLEX", 16: "DEF", 17: "K", 20: "BN", 21: "IR", 23: "FLEX",
 }
 # ESPN position IDs on player objects
 POSITION_MAP = {1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "DEF"}

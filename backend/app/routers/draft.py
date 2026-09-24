@@ -46,6 +46,41 @@ ADVICE_QUESTION = (
 
 DEFAULT_ROUNDS = 16
 
+# Fields the advice prompt describes for each candidate. Kicker/defense
+# candidates come from a smaller late-round board and lack most of them, so
+# they're read with .get() (None) rather than assumed present.
+CANDIDATE_FIELDS = (
+    "name",
+    "position",
+    "team",
+    "tier",
+    "proj_points",
+    "vor",
+    "adp",
+    "adp_delta",
+    "market_edge",
+    "is_tier_end",
+    "available_at_following_pick",
+    "injury_status",
+    "roster_status",
+    "bye_week",
+    "reasons",
+)
+
+
+def draft_rounds(roster_positions: list[str] | None) -> int:
+    """Draft length: one pick per roster slot, not counting IR/taxi slots."""
+    if not roster_positions:
+        return DEFAULT_ROUNDS
+    return len([s for s in roster_positions if (s or "").upper() not in ("IR", "TAXI")])
+
+
+def candidate_context(pick: dict, news: list[dict]) -> dict:
+    return {
+        **{key: pick.get(key) for key in CANDIDATE_FIELDS},
+        "recent_news": [n["headline"] for n in news],
+    }
+
 
 class RecommendRequest(BaseModel):
     connection_id: str | None = None
@@ -190,11 +225,7 @@ async def live_draft(
         season = get_settings().current_season
         scoring = conn.scoring_type if conn.scoring_type in SCORING_FORMATS else "ppr"
         teams = await _league_size(db, conn)
-        rounds = (
-            len([s for s in conn.roster_positions if s.upper() not in ("IR", "TAXI")])
-            if conn.roster_positions
-            else DEFAULT_ROUNDS
-        )
+        rounds = draft_rounds(conn.roster_positions)
         board = await compute_draft_board(
             db,
             season=season,
@@ -254,9 +285,7 @@ async def draft_recommend(
         )
 
     season = get_settings().current_season
-    rounds = body.rounds or (
-        len(roster_positions) if roster_positions else DEFAULT_ROUNDS
-    )
+    rounds = body.rounds or draft_rounds(roster_positions)
     late = await late_round_board(db, season, scoring)
     picks = recommend_picks(
         board,
@@ -301,9 +330,7 @@ async def draft_advice(
         )
 
     season = get_settings().current_season
-    rounds = body.rounds or (
-        len(roster_positions) if roster_positions else DEFAULT_ROUNDS
-    )
+    rounds = body.rounds or draft_rounds(roster_positions)
     late = await late_round_board(db, season, scoring)
     picks = recommend_picks(
         board,
@@ -350,32 +377,7 @@ async def draft_advice(
             roster_positions, [p["position"] for p in my_roster]
         ),
         "candidates": [
-            {
-                **{
-                    key: pick[key]
-                    for key in (
-                        "name",
-                        "position",
-                        "team",
-                        "tier",
-                        "proj_points",
-                        "vor",
-                        "adp",
-                        "adp_delta",
-                        "market_edge",
-                        "is_tier_end",
-                        "available_at_following_pick",
-                        "injury_status",
-                        "roster_status",
-                        "bye_week",
-                        "reasons",
-                    )
-                },
-                "recent_news": [
-                    n["headline"] for n in news.get(pick["player_id"], [])
-                ],
-            }
-            for pick in picks
+            candidate_context(pick, news.get(pick["player_id"], [])) for pick in picks
         ],
     }
     analysis = await generate_response(ADVICE_QUESTION, context)

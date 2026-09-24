@@ -31,7 +31,7 @@ async def db():
 
 @pytest.fixture(autouse=True)
 def _no_external(monkeypatch):
-    async def _empty(season, week):
+    async def _empty(season, week, scoring="ppr"):
         return {}
 
     monkeypatch.setattr(projection_service, "get_external_projections", _empty)

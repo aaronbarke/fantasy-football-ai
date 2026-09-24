@@ -65,6 +65,32 @@ async def fetch_injuries() -> list[dict]:
 
 SEVERE_STATUSES = ("out", "doubtful", "injured reserve", "ir")
 
+# Sleeper (daily player-pool sync) and ESPN (this feed) spell the same
+# designation differently. Compare canonical forms, or every IR player looks
+# like a brand-new injury each morning and his owner gets the alert again.
+_CANONICAL_STATUS = {
+    "ir": "injured reserve",
+    "sus": "suspension",
+    "susp": "suspension",
+    "suspended": "suspension",
+    "pup": "physically unable to perform",
+    "pup-r": "physically unable to perform",
+    "pup-p": "physically unable to perform",
+    "nfi": "non-football injury",
+    "nfi-r": "non-football injury",
+    "nfi-a": "non-football injury",
+    "d": "doubtful",
+    "q": "questionable",
+    "o": "out",
+}
+
+
+def canonical_status(status: str | None) -> str | None:
+    if not status:
+        return None
+    s = status.strip().lower()
+    return _CANONICAL_STATUS.get(s, s)
+
 
 def _is_severe(status: str | None) -> bool:
     return bool(status) and any(s in status.lower() for s in SEVERE_STATUSES)
@@ -109,7 +135,11 @@ async def sync_injuries(db: AsyncSession) -> list[InjuryEvent]:
         )
 
         prev = before.get(inj["espn_id"])
-        if prev and prev[1] != inj["status"] and _is_severe(inj["status"]):
+        if (
+            prev
+            and canonical_status(prev[1]) != canonical_status(inj["status"])
+            and _is_severe(inj["status"])
+        ):
             event = InjuryEvent(
                 player_id=prev[0], old_status=prev[1], new_status=inj["status"]
             )

@@ -2,7 +2,7 @@
 schedule-strength heatmap."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from sqlalchemy import func, select
@@ -15,6 +15,54 @@ logger = logging.getLogger(__name__)
 SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 # ESPN abbreviations that differ from ours
 ESPN_ABBR_FIX = {"WSH": "WAS"}
+# A game is treated as finished this long after kickoff.
+GAME_FINISHED_AFTER = timedelta(hours=4)
+REGULAR_SEASON_MAX_WEEK = 18
+
+
+def utc_now() -> datetime:
+    """Naive UTC, matching how game times are stored."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+async def current_nfl_week(
+    db: AsyncSession, season: int, now: datetime | None = None
+) -> int | None:
+    """The active NFL week from the schedule: the earliest week whose games
+    aren't all finished (a game is done ~4h after kickoff). Preseason → the
+    first week; after the finale → the last. ``None`` if no schedule is loaded.
+
+    This is the single definition of "this week" — projections, the matchup
+    page, the game plan, the dashboard and chat all resolve the week through it,
+    so they can't drift apart."""
+    now = now or utc_now()
+    rows = (
+        await db.execute(
+            select(NflSchedule.week, NflSchedule.game_time).where(
+                NflSchedule.season == season, NflSchedule.game_time.is_not(None)
+            )
+        )
+    ).all()
+    if not rows:
+        return None
+    last_kick: dict[int, datetime] = {}
+    for week, game_time in rows:
+        if week not in last_kick or game_time > last_kick[week]:
+            last_kick[week] = game_time
+    unfinished = [w for w, kick in last_kick.items() if kick + GAME_FINISHED_AFTER > now]
+    return min(unfinished) if unfinished else max(last_kick)
+
+
+async def ensure_schedule(db: AsyncSession, season: int) -> None:
+    """Load the season's schedule once if it isn't in the DB yet. Week
+    resolution, bye detection and odds-to-week matching all depend on it."""
+    have = (
+        await db.execute(
+            select(func.count()).select_from(NflSchedule).where(NflSchedule.season == season)
+        )
+    ).scalar_one()
+    if not have:
+        await sync_schedule(db, season)
 
 
 async def sync_schedule(db: AsyncSession, season: int) -> int:
@@ -78,7 +126,23 @@ async def latest_stats_season(db: AsyncSession) -> int | None:
     ).scalar_one_or_none()
 
 
-async def defense_vs_position_ranks(db: AsyncSession, season: int) -> dict[tuple[str, str], dict]:
+SCORING_POINTS_FIELD = {
+    "ppr": "fantasy_points_ppr",
+    "half_ppr": "fantasy_points_half",
+    "standard": "fantasy_points_std",
+}
+
+
+def points_column(scoring: str | None):
+    """The weekly-stats fantasy points column for a league's scoring format."""
+    return getattr(
+        PlayerStatsWeekly, SCORING_POINTS_FIELD.get(scoring or "ppr", "fantasy_points_ppr")
+    )
+
+
+async def defense_vs_position_ranks(
+    db: AsyncSession, season: int, scoring: str = "ppr"
+) -> dict[tuple[str, str], dict]:
     """(team, position) → {rank, pts_allowed_avg}. Rank 1 = allows the MOST
     fantasy points to that position (i.e. the easiest matchup)."""
     rows = (
@@ -86,12 +150,13 @@ async def defense_vs_position_ranks(db: AsyncSession, season: int) -> dict[tuple
             select(
                 PlayerStatsWeekly.opponent,
                 Player.position,
-                func.sum(PlayerStatsWeekly.fantasy_points_ppr).label("total"),
+                func.sum(points_column(scoring)).label("total"),
                 func.count(func.distinct(PlayerStatsWeekly.week)).label("weeks"),
             )
             .join(Player, Player.id == PlayerStatsWeekly.player_id)
             .where(
                 PlayerStatsWeekly.season == season,
+                PlayerStatsWeekly.week <= REGULAR_SEASON_MAX_WEEK,
                 PlayerStatsWeekly.opponent.is_not(None),
                 Player.position.in_(["QB", "RB", "WR", "TE"]),
             )
@@ -124,13 +189,7 @@ async def build_schedule_strength(
     """Heatmap payload: each roster player × upcoming weeks with opponent +
     matchup difficulty rank."""
     # Ensure the schedule is loaded (lazy one-time sync)
-    have = (
-        await db.execute(
-            select(func.count()).select_from(NflSchedule).where(NflSchedule.season == season)
-        )
-    ).scalar_one()
-    if not have:
-        await sync_schedule(db, season)
+    await ensure_schedule(db, season)
 
     stats_season = await latest_stats_season(db) or season
     ranks = await defense_vs_position_ranks(db, stats_season)

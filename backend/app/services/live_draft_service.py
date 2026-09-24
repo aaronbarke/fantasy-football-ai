@@ -16,8 +16,23 @@ import logging
 import httpx
 
 from app.models import LeagueConnection
-from app.services.espn_service import ESPNClient
+from app.services.espn_service import PRO_TEAM_MAP, ESPNClient
 from app.utils.player_id_map import espn_to_sleeper_map
+
+# ESPN team D/ST "players" have ids of -(16000 + proTeamId), e.g. -16002 for the
+# Bills. They aren't in the player crosswalk; our defense ids are team codes.
+_ESPN_DST_BASE = 16000
+
+
+def _map_espn_pick(espn_pid, espn_map: dict[str, str]) -> str | None:
+    """Our player id for an ESPN draft pick, including team defenses."""
+    try:
+        pid = int(espn_pid)
+    except (TypeError, ValueError):
+        return None
+    if pid <= -_ESPN_DST_BASE:
+        return PRO_TEAM_MAP.get(-pid - _ESPN_DST_BASE)
+    return espn_map.get(str(pid))
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +86,7 @@ def _parse_picks(
         player_sleeper = None
         if is_made:
             made += 1
-            player_sleeper = espn_map.get(str(espn_pid))
+            player_sleeper = _map_espn_pick(espn_pid, espn_map)
             if player_sleeper:
                 drafted_ids.append(player_sleeper)
                 if is_you:

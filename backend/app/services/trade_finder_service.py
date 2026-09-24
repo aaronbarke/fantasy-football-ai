@@ -15,6 +15,11 @@ How it decides:
   weekly points go UP and the partner's don't go down. That's what makes a deal
   realistic — it naturally trades from a bench/surplus into a starting need, and
   only proposes swaps the other manager would plausibly accept.
+- **Roster spots**: in a 2-for-1 the side taking two players has to cut someone
+  if their roster is full. That cut is part of the price, so the fairness check
+  nets it out, and the lineup math runs on the post-cut roster.
+- **Injuries**: players on IR / PUP / suspended are out for weeks, so they count
+  for nothing in a lineup and are never offered or targeted.
 """
 
 from itertools import combinations
@@ -24,11 +29,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import LeagueConnection, Player, Roster
 from app.services.gameplan_service import _lineup_slots, optimize_lineup
+from app.services.opportunity_service import is_long_term_absent
 from app.services.value_service import compute_player_values
 
 # Value gap (fraction of the larger side) still considered "roughly equal value".
 FAIRNESS_PCT = 0.10
 VALUED_POSITIONS = {"QB", "RB", "WR", "TE"}
+# Roster slots that don't count toward the active roster limit.
+_RESERVE_SLOTS = {"IR", "TAXI"}
 
 
 def _lineup_points(slots: list[str], players: list[dict]) -> float:
@@ -40,25 +48,55 @@ def _lineup_points(slots: list[str], players: list[dict]) -> float:
 def _roster_dicts(
     ids: list[str], values: dict[str, dict], meta: dict[str, Player]
 ) -> list[dict]:
-    """Optimizer-shaped player dicts for a roster: projected = weekly ppg."""
+    """Optimizer-shaped player dicts for a roster: projected = weekly ppg.
+    A player out for weeks (IR / PUP / suspended) contributes nothing."""
     out = []
     for pid in ids:
         p = meta.get(pid)
         if p is None:
             continue
         v = values.get(pid, {})
+        long_term = is_long_term_absent(p.injury_status)
         out.append(
             {
                 "id": pid,
                 "name": p.full_name,
                 "position": p.position,
                 "team": p.team,
-                "projected": v.get("ppg") or 0.0,
+                "projected": 0.0 if long_term else (v.get("ppg") or 0.0),
                 "value": v.get("value"),
                 "trend": v.get("trend"),
+                "injury_status": p.injury_status,
+                "long_term_injury": long_term,
             }
         )
     return out
+
+
+def active_roster_size(roster_positions: list[str] | None) -> int | None:
+    """Active roster limit (starters + bench, not IR/taxi), or None if unknown."""
+    if not roster_positions:
+        return None
+    return sum(1 for s in roster_positions if (s or "").upper() not in _RESERVE_SLOTS)
+
+
+def _forced_drops(
+    after: list[dict], incoming_ids: set[str], roster_size: int | None
+) -> list[dict]:
+    """Players a side must cut to get back under its roster limit after taking
+    on more bodies than it sent — the least valuable ones not in the deal.
+    Long-term injured players are assumed to sit in reserve slots."""
+    if roster_size is None:
+        return []
+    active = [p for p in after if not p.get("long_term_injury")]
+    excess = len(active) - roster_size
+    if excess <= 0:
+        return []
+    cuttable = sorted(
+        (p for p in active if p["id"] not in incoming_ids),
+        key=lambda p: ((p.get("value") or 0.0), p.get("projected") or 0.0),
+    )
+    return cuttable[:excess]
 
 
 def _side_value(players: list[dict]) -> float:
@@ -82,6 +120,7 @@ def rank_trades(
     partner: dict,
     target: str | None = None,
     shed: str | None = None,
+    roster_size: int | None = None,
 ) -> list[dict]:
     """Pure ranking of win-win, roughly-even packages between two rosters —
     1-for-1, 2-for-1 (consolidate) and 1-for-2 (add depth). Best lineup gain for
@@ -89,14 +128,23 @@ def rank_trades(
     re-optimization, so most combinations are rejected cheaply.
 
     ``target`` limits results to packages that bring back that position;
-    ``shed`` limits them to packages that give that position away."""
+    ``shed`` limits them to packages that give that position away.
+    ``roster_size`` (active roster limit) makes the side that takes on an extra
+    body cut its least valuable player; None skips roster-limit modeling."""
     target = target.upper() if target else None
     shed = shed.upper() if shed else None
     my_base = _lineup_points(slots, my_players)
     their_base = _lineup_points(slots, their_players)
 
-    my_pool = [p for p in my_players if p["value"] is not None and p["position"] in VALUED_POSITIONS]
-    their_pool = [p for p in their_players if p["value"] is not None and p["position"] in VALUED_POSITIONS]
+    def _tradeable(p: dict) -> bool:
+        return (
+            p["value"] is not None
+            and p["position"] in VALUED_POSITIONS
+            and not p.get("long_term_injury")
+        )
+
+    my_pool = [p for p in my_players if _tradeable(p)]
+    their_pool = [p for p in their_players if _tradeable(p)]
 
     my_singles = [[p] for p in my_pool]
     my_pairs = [list(c) for c in combinations(my_pool, 2)]
@@ -128,6 +176,19 @@ def rank_trades(
                 recv_ids = {p["id"] for p in recv}
                 my_after = [p for p in my_players if p["id"] not in give_ids] + recv
                 their_after = [p for p in their_players if p["id"] not in recv_ids] + give
+                # A full roster taking on an extra body has to cut someone, and
+                # that cut is part of what the deal costs them.
+                my_drops = _forced_drops(my_after, recv_ids, roster_size)
+                their_drops = _forced_drops(their_after, give_ids, roster_size)
+                if my_drops or their_drops:
+                    net_recv = rv - _side_value(my_drops)
+                    net_give = gv - _side_value(their_drops)
+                    if abs(net_recv - net_give) / max(net_recv, net_give, 1.0) > FAIRNESS_PCT:
+                        continue
+                    my_cut = {p["id"] for p in my_drops}
+                    their_cut = {p["id"] for p in their_drops}
+                    my_after = [p for p in my_after if p["id"] not in my_cut]
+                    their_after = [p for p in their_after if p["id"] not in their_cut]
                 my_gain = _lineup_points(slots, my_after) - my_base
                 their_gain = _lineup_points(slots, their_after) - their_base
                 if my_gain <= 0 or their_gain < 0:  # must be a genuine win-win
@@ -143,6 +204,8 @@ def rank_trades(
                         "value_gap": round(abs(gv - rv), 1),
                         "your_lineup_gain": round(my_gain, 1),
                         "their_lineup_gain": round(their_gain, 1),
+                        "you_drop": [_player_view(p) for p in my_drops],
+                        "they_drop": [_player_view(p) for p in their_drops],
                         "rationale": _package_rationale(
                             give, recv, my_gain, partner["owner_name"]
                         ),
@@ -169,6 +232,7 @@ def _player_view(p: dict) -> dict:
         "value": p["value"],
         "ppg": p["projected"],
         "trend": p["trend"],
+        "injury_status": p.get("injury_status"),
     }
 
 
@@ -192,7 +256,7 @@ async def find_trades(
     if not others:
         return []
 
-    values = await compute_player_values(db)
+    values = await compute_player_values(db, conn.scoring_type or "ppr")
     all_ids = set(mine.players)
     for r in others:
         all_ids.update(r.players)
@@ -202,6 +266,7 @@ async def find_trades(
     meta = {p.id: p for p in players}
 
     slots = _lineup_slots(conn)
+    roster_size = active_roster_size(conn.roster_positions)
     my_players = _roster_dicts(list(mine.players), values, meta)
 
     candidates: list[dict] = []
@@ -214,7 +279,9 @@ async def find_trades(
         }
         their_players = _roster_dicts(list(other.players), values, meta)
         candidates.extend(
-            rank_trades(my_players, their_players, slots, partner, target, shed)
+            rank_trades(
+                my_players, their_players, slots, partner, target, shed, roster_size
+            )
         )
 
     candidates.sort(key=_trade_score, reverse=True)

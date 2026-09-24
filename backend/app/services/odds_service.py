@@ -3,14 +3,15 @@ job calls twice daily, well within budget. Implied team totals derived from
 spread + over/under are among the best predictors of fantasy scoring."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models import GameCondition
+from app.models import GameCondition, NflSchedule
+from app.services.schedule_service import ensure_schedule, utc_now
 from app.utils.constants import STADIUMS, TEAM_NAME_TO_ABBR
 from app.utils.fantasy_math import implied_totals
 
@@ -68,20 +69,76 @@ def parse_game_odds(game: dict) -> dict | None:
     }
 
 
+def _week_start(dt: datetime) -> datetime:
+    """Start of the NFL week containing ``dt``. Weeks turn over on Tuesday; use
+    10:00 UTC so a late Monday-night game (early Tuesday UTC) stays in its week."""
+    anchor = dt - timedelta(hours=10)
+    days_since_tuesday = (anchor.weekday() - 1) % 7
+    start = anchor - timedelta(days=days_since_tuesday)
+    return start.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=10)
+
+
+async def _week_for_game(
+    db: AsyncSession,
+    season: int,
+    home: str,
+    away: str,
+    kickoff: datetime,
+    current_week: int,
+    now: datetime,
+) -> int:
+    """The NFL week a priced game belongs to.
+
+    The Odds API lists every upcoming game (often two or more weeks out), so a
+    line can't just be filed under "this week". Match it to the schedule by its
+    teams and kickoff; if the schedule doesn't have it, count week boundaries
+    between now and kickoff."""
+    rows = (
+        await db.execute(
+            select(NflSchedule.week, NflSchedule.game_time).where(
+                NflSchedule.season == season,
+                NflSchedule.home_team == home,
+                NflSchedule.away_team == away,
+            )
+        )
+    ).all()
+    if rows:
+        week, _ = min(
+            rows,
+            key=lambda r: abs((r.game_time or kickoff) - kickoff),
+        )
+        return int(week)
+    offset = (_week_start(kickoff) - _week_start(now)).days // 7
+    return current_week + max(0, offset)
+
+
 async def sync_odds(db: AsyncSession, season: int, week: int) -> int:
-    """Upsert current lines into game_conditions for the given week."""
+    """Upsert current lines into game_conditions, each under its own NFL week.
+    ``week`` is the current week, used only when the schedule can't place a
+    game."""
     games = await fetch_odds()
+    if not games:
+        return 0
+    try:
+        await ensure_schedule(db, season)
+    except Exception:  # noqa: BLE001 — the calendar fallback still places games
+        logger.warning("Schedule unavailable; placing odds by calendar week")
+    now = utc_now()
     count = 0
     for game in games:
         parsed = parse_game_odds(game)
         if parsed is None:
             continue
+        kickoff = parsed["game_time"].replace(tzinfo=None)
+        game_week = await _week_for_game(
+            db, season, parsed["home_team"], parsed["away_team"], kickoff, week, now
+        )
 
         existing = (
             await db.execute(
                 select(GameCondition).where(
                     GameCondition.season == season,
-                    GameCondition.week == week,
+                    GameCondition.week == game_week,
                     GameCondition.home_team == parsed["home_team"],
                 )
             )
@@ -90,13 +147,14 @@ async def sync_odds(db: AsyncSession, season: int, week: int) -> int:
         if existing is None:
             existing = GameCondition(
                 season=season,
-                week=week,
+                week=game_week,
                 home_team=parsed["home_team"],
                 away_team=parsed["away_team"],
             )
             db.add(existing)
 
-        existing.game_time = parsed["game_time"].replace(tzinfo=None)
+        existing.away_team = parsed["away_team"]
+        existing.game_time = kickoff
         existing.spread = parsed["spread"]
         existing.over_under = parsed["over_under"]
         existing.dome = STADIUMS.get(parsed["home_team"], {}).get("dome", False)
@@ -107,5 +165,5 @@ async def sync_odds(db: AsyncSession, season: int, week: int) -> int:
         count += 1
 
     await db.commit()
-    logger.info("Odds sync: %d games updated for week %d", count, week)
+    logger.info("Odds sync: %d games updated (current week %d)", count, week)
     return count

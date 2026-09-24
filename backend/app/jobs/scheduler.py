@@ -10,6 +10,7 @@ Cadence:
 - Odds: 8 AM + 8 PM CT (free tier budget: 500 req/month)
 - League sync: every 2 hours
 - Weather: Thu–Mon 6 AM + noon CT (game days only)
+- NFL schedule: daily 4 AM CT (flexed kickoff times; week resolution + byes)
 """
 
 import logging
@@ -27,6 +28,7 @@ from app.services.injury_service import sync_injuries
 from app.services.news_service import sync_news
 from app.services.nfl_data_service import sync_id_crosswalk, sync_weekly_stats
 from app.services.odds_service import sync_odds
+from app.services.schedule_service import sync_schedule
 from app.services.sleeper_service import SleeperClient
 from app.services.sync_service import sync_league, sync_player_pool
 from app.services.weather_service import get_game_weather
@@ -153,6 +155,14 @@ async def job_sync_all_leagues() -> None:
                 logger.exception("League sync failed for %s", conn.league_id)
 
 
+async def job_refresh_schedule() -> None:
+    """Re-pull the season schedule so flexed games carry their real kickoff —
+    live scoring, bye detection and odds-to-week matching all read it."""
+    settings = get_settings()
+    async with SessionLocal() as db:
+        await sync_schedule(db, settings.current_season)
+
+
 async def job_refresh_weather() -> None:
     settings = get_settings()
     week = await _current_week()
@@ -237,6 +247,12 @@ def start_scheduler() -> None:
         job_refresh_weather,
         CronTrigger(day_of_week="thu,fri,sat,sun,mon", hour="6,12"),
         id="weather",
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        job_refresh_schedule,
+        CronTrigger(hour=4),
+        id="schedule",
         misfire_grace_time=3600,
     )
     scheduler.add_job(

@@ -15,14 +15,15 @@ from app.models import (
     AvailablePlayer,
     GameCondition,
     LeagueConnection,
-    Matchup,
     NflSchedule,
     Player,
     PlayerStatsWeekly,
     Roster,
 )
-from app.services.projection_service import compute_projections
+from app.services.gameplan_service import resolve_current_matchup
+from app.services.projection_service import REGULAR_SEASON_MAX_WEEK, compute_projections
 from app.services.schedule_service import (
+    current_nfl_week,
     defense_vs_position_ranks,
     latest_stats_season,
 )
@@ -95,6 +96,7 @@ async def player_package(
             .where(
                 PlayerStatsWeekly.player_id == player.id,
                 PlayerStatsWeekly.season <= season,
+                PlayerStatsWeekly.week <= REGULAR_SEASON_MAX_WEEK,
             )
             .order_by(PlayerStatsWeekly.season.desc(), PlayerStatsWeekly.week.desc())
             .limit(5)
@@ -127,22 +129,22 @@ async def player_package(
     fps = [w["fantasy_points"] for w in last_weeks]
     targets = [w["targets"] for w in last_weeks]
 
-    # Upcoming game conditions for the player's team
+    # This week's game conditions for the player's team. Only the current NFL
+    # week's line counts — never last week's, and never a game two weeks out.
+    current_week = await current_nfl_week(db, season)
     conditions = None
     if player.team:
+        gc_query = select(GameCondition).where(
+            GameCondition.season == season,
+            or_(
+                GameCondition.home_team == player.team,
+                GameCondition.away_team == player.team,
+            ),
+        )
+        if current_week is not None:
+            gc_query = gc_query.where(GameCondition.week == current_week)
         gc = (
-            await db.execute(
-                select(GameCondition)
-                .where(
-                    GameCondition.season == season,
-                    or_(
-                        GameCondition.home_team == player.team,
-                        GameCondition.away_team == player.team,
-                    ),
-                )
-                .order_by(GameCondition.week.desc())
-                .limit(1)
-            )
+            await db.execute(gc_query.order_by(GameCondition.week.desc()).limit(1))
         ).scalar_one_or_none()
         if gc:
             is_home = gc.home_team == player.team
@@ -171,19 +173,18 @@ async def player_package(
     matchup_difficulty = None
     opponent = (conditions or {}).get("opponent")
     if opponent is None and player.team:
+        # Next game from the current week on (not Week 1's opponent).
+        next_query = select(NflSchedule).where(
+            NflSchedule.season == season,
+            or_(
+                NflSchedule.home_team == player.team,
+                NflSchedule.away_team == player.team,
+            ),
+        )
+        if current_week is not None:
+            next_query = next_query.where(NflSchedule.week >= current_week)
         next_game = (
-            await db.execute(
-                select(NflSchedule)
-                .where(
-                    NflSchedule.season == season,
-                    or_(
-                        NflSchedule.home_team == player.team,
-                        NflSchedule.away_team == player.team,
-                    ),
-                )
-                .order_by(NflSchedule.week.asc())
-                .limit(1)
-            )
+            await db.execute(next_query.order_by(NflSchedule.week.asc()).limit(1))
         ).scalar_one_or_none()
         if next_game:
             opponent = (
@@ -194,7 +195,7 @@ async def player_package(
     if opponent and player.position in {"QB", "RB", "WR", "TE"}:
         dvp_season = await latest_stats_season(db)
         if dvp_season:
-            ranks = await defense_vs_position_ranks(db, dvp_season)
+            ranks = await defense_vs_position_ranks(db, dvp_season, scoring_type)
             info = ranks.get((opponent, player.position))
             if info:
                 pos_avgs = [
@@ -288,7 +289,7 @@ def _compact_projection(pkg: dict) -> dict:
 
 
 async def _attach_projections(
-    db: AsyncSession, context: dict[str, Any], season: int
+    db: AsyncSession, context: dict[str, Any], season: int, scoring: str = "ppr"
 ) -> None:
     """Anchor every surfaced player on the projection engine. Without this the
     chat reasons about drops/adds/start-sit from names and trending adds alone
@@ -306,7 +307,7 @@ async def _attach_projections(
     ids = {item["id"] for item in buckets if item.get("id")}
     if not ids:
         return
-    proj_map = await compute_projections(db, list(ids), season)
+    proj_map = await compute_projections(db, list(ids), season, scoring)
     for item in buckets:
         pkg = proj_map.get(item.get("id"))
         if pkg:
@@ -341,7 +342,7 @@ async def build_context(
         if user_roster:
             starters, bench = await _roster_names(db, user_roster)
             context["user_roster"] = {
-                "record": f"{user_roster.wins}-{user_roster.losses}",
+                "record": _record(user_roster.wins, user_roster.losses, user_roster.ties),
                 "starters": starters,
                 "bench": bench,
             }
@@ -378,43 +379,27 @@ async def build_context(
         ]
 
     if intent == "matchup" and conn and conn.team_id:
-        latest_week = (
-            await db.execute(
-                select(Matchup.week)
-                .where(Matchup.connection_id == conn.id)
-                .order_by(Matchup.week.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if latest_week:
-            m = (
+        # This NFL week's opponent — the same one the matchup page shows. (ESPN
+        # stores the whole season's schedule, so "latest week" would be the
+        # final week of the regular season.)
+        m = await resolve_current_matchup(db, conn)
+        if m:
+            opp_id = m.team_b_id if m.team_a_id == conn.team_id else m.team_a_id
+            opp_roster = (
                 await db.execute(
-                    select(Matchup).where(
-                        Matchup.connection_id == conn.id,
-                        Matchup.week == latest_week,
-                        or_(
-                            Matchup.team_a_id == conn.team_id,
-                            Matchup.team_b_id == conn.team_id,
-                        ),
+                    select(Roster).where(
+                        Roster.connection_id == conn.id, Roster.team_id == opp_id
                     )
                 )
             ).scalar_one_or_none()
-            if m:
-                opp_id = m.team_b_id if m.team_a_id == conn.team_id else m.team_a_id
-                opp_roster = (
-                    await db.execute(
-                        select(Roster).where(
-                            Roster.connection_id == conn.id, Roster.team_id == opp_id
-                        )
-                    )
-                ).scalar_one_or_none()
-                if opp_roster:
-                    opp_starters, _ = await _roster_names(db, opp_roster)
-                    context["opponent"] = {
-                        "owner_name": opp_roster.owner_name,
-                        "record": f"{opp_roster.wins}-{opp_roster.losses}",
-                        "starters": opp_starters,
-                    }
+            if opp_roster:
+                opp_starters, _ = await _roster_names(db, opp_roster)
+                context["opponent"] = {
+                    "week": m.week,
+                    "owner_name": opp_roster.owner_name,
+                    "record": _record(opp_roster.wins, opp_roster.losses, opp_roster.ties),
+                    "starters": opp_starters,
+                }
 
     # Trade questions need to see the rest of the league — who has a surplus at
     # your position of need, and who needs what you can spare. Every team's full
@@ -442,5 +427,5 @@ async def build_context(
         if league_rosters:
             context["league_rosters"] = league_rosters
 
-    await _attach_projections(db, context, season)
+    await _attach_projections(db, context, season, scoring_type)
     return intent, context

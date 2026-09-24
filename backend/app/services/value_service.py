@@ -31,6 +31,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Player, PlayerStatsWeekly
+from app.services.opportunity_service import is_long_term_absent
+from app.services.schedule_service import points_column
 
 VALUED_POSITIONS = {"QB", "RB", "WR", "TE"}
 MIN_GAMES = 3
@@ -43,6 +45,10 @@ PRIOR_SEASON_WEIGHT = 0.5  # latest season counts 2x the season before
 # seasons — so one down/injury year (or a cold streak) doesn't tank an
 # established star's trade value.
 PEAK_FLOOR = 0.90
+# ...but only a real season counts as "proven". Without this, two hot games at
+# the start of a new season become the player's "peak" and floor his value at
+# 90% of a small-sample fluke.
+PEAK_MIN_GAMES = 6
 
 # Momentum
 ELITE_ANCHOR = 20.0        # ppg that reads as "elite tier" for tier scaling
@@ -80,7 +86,7 @@ def _blended_base(samples: list[tuple[int, int, float]], latest_season: int, rec
     pts = wt = 0.0
     for season, week, p in samples:
         if season == latest_season:
-            w = 2.0 if week >= recent_cutoff else 1.0
+            w = 2.0 if week > recent_cutoff else 1.0
         else:
             w = PRIOR_SEASON_WEIGHT
         pts += p * w
@@ -131,28 +137,33 @@ def _value_from_vor(adj_ppg: float, replacement: float) -> float:
     return round(ROSTER_FLOOR + SCALE * (vor**GAMMA), 1)
 
 
-async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
-    """player_id -> {value, ppg, base_ppg, trend, games, position, season}."""
+async def compute_player_values(
+    db: AsyncSession, scoring: str = "ppr"
+) -> dict[str, dict]:
+    """player_id -> {value, ppg, base_ppg, trend, games, position, season,
+    injury_status, long_term_injury}, in the league's scoring format."""
     latest_season = (
         await db.execute(select(func.max(PlayerStatsWeekly.season)))
     ).scalar()
     if latest_season is None:
         return {}
 
+    points_col = points_column(scoring)
     rows = (
         await db.execute(
             select(
                 PlayerStatsWeekly.player_id,
                 PlayerStatsWeekly.season,
                 PlayerStatsWeekly.week,
-                PlayerStatsWeekly.fantasy_points_ppr,
+                points_col.label("pts"),
                 Player.position,
+                Player.injury_status,
             )
             .join(Player, Player.id == PlayerStatsWeekly.player_id)
             .where(
                 PlayerStatsWeekly.season >= latest_season - 1,
                 PlayerStatsWeekly.week <= REGULAR_SEASON_MAX_WEEK,
-                PlayerStatsWeekly.fantasy_points_ppr.is_not(None),
+                points_col.is_not(None),
             )
         )
     ).all()
@@ -163,12 +174,13 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
     recent_cutoff = latest_week - RECENT_WINDOW
 
     by_player: dict[str, dict] = defaultdict(
-        lambda: {"samples": [], "position": None}
+        lambda: {"samples": [], "position": None, "injury_status": None}
     )
     for r in rows:
         e = by_player[r.player_id]
         e["position"] = r.position
-        e["samples"].append((r.season, r.week, float(r.fantasy_points_ppr)))
+        e["injury_status"] = r.injury_status
+        e["samples"].append((r.season, r.week, float(r.pts)))
 
     # First pass: baseline + momentum-adjusted ppg per qualifying player
     computed: dict[str, dict] = {}
@@ -177,12 +189,16 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
             continue
         samples = e["samples"]
         blended = _blended_base(samples, int(latest_season), recent_cutoff)
-        # Peak floor: best single-season average of the last two seasons, so a
-        # down/injury year can dent but not crater a proven player.
+        # Peak floor: best full-enough season average of the last two seasons,
+        # so a down/injury year can dent but not crater a proven player. A
+        # season with only a handful of games isn't proof of anything.
         season_pts: dict[int, list[float]] = defaultdict(list)
         for season, _wk, p in samples:
             season_pts[season].append(p)
-        peak = max(sum(v) / len(v) for v in season_pts.values())
+        proven = [
+            sum(v) / len(v) for v in season_pts.values() if len(v) >= PEAK_MIN_GAMES
+        ]
+        peak = max(proven) if proven else 0.0
         base = max(blended, PEAK_FLOOR * peak)
         if base <= 0:
             continue
@@ -196,6 +212,7 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
             "peak": peak,
             "games": len(samples),
             "position": e["position"],
+            "injury_status": e["injury_status"],
         }
 
     # Replacement level per position from the baseline distribution
@@ -229,6 +246,8 @@ async def compute_player_values(db: AsyncSession) -> dict[str, dict]:
             "games": c["games"],
             "position": c["position"],
             "season": int(latest_season),
+            "injury_status": c["injury_status"],
+            "long_term_injury": is_long_term_absent(c["injury_status"]),
         }
     return values
 

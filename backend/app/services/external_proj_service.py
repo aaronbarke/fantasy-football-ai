@@ -16,11 +16,17 @@ logger = logging.getLogger(__name__)
 
 PROJ_URL = "https://api.sleeper.com/projections/nfl/{season}/{week}"
 CACHE_TTL = 6 * 3600  # projections move slowly within a week
+# Sleeper's projected-points field for each of our scoring formats.
+POINTS_FIELD = {"ppr": "pts_ppr", "half_ppr": "pts_half_ppr", "standard": "pts_std"}
 
 
-async def get_external_projections(season: int, week: int) -> dict[str, float]:
-    """player_id -> projected PPR points for the given week. {} if unavailable."""
-    key = f"sleeperproj:{season}:{week}"
+async def get_external_projections(
+    season: int, week: int, scoring: str = "ppr"
+) -> dict[str, float]:
+    """player_id -> projected points (in the league's scoring format) for the
+    given week. {} if unavailable."""
+    field = POINTS_FIELD.get(scoring, "pts_ppr")
+    key = f"sleeperproj:{season}:{week}:{field}"
     cached = await cache_get(key)
     if cached is not None:
         return cached
@@ -43,7 +49,7 @@ async def get_external_projections(season: int, week: int) -> dict[str, float]:
     out: dict[str, float] = {}
     for row in rows:
         pid = str(row.get("player_id") or "")
-        pts = (row.get("stats") or {}).get("pts_ppr")
+        pts = (row.get("stats") or {}).get(field)
         if pid and pts is not None:
             out[pid] = float(pts)
     if out:

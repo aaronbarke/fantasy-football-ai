@@ -6,7 +6,7 @@ win probability against this week's opponent, and the matchup/Vegas context
 behind each call. The AI narrative endpoint turns it into a coach's brief.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,7 @@ from app.models import (
     Roster,
 )
 from app.services.projection_service import compute_projections, win_probability
+from app.services.schedule_service import current_nfl_week
 
 # Bench/IR-style slots that never take a starter
 NON_LINEUP = {"BN", "IR", "TAXI"}
@@ -42,6 +43,24 @@ KDEF_BASELINE = 8.0
 # projection, but flag it as close and surface the deciding contextual factor
 # (weather, game total, matchup) baked into the projection.
 CLOSE_MARGIN = 1.0
+
+# Real length of an NFL game (kickoff to final whistle), used to estimate how
+# much of an in-progress game — and so of a player's projection — is still left.
+GAME_MINUTES = 190.0
+
+
+def _remaining_fraction(kickoff: datetime | None, now: datetime) -> float:
+    """Share of a player's game still to be played: 1 before kickoff, falling
+    linearly to 0 by the final whistle. Unknown kickoff → treat as unplayed."""
+    if kickoff is None or kickoff > now:
+        return 1.0
+    elapsed = (now - kickoff).total_seconds() / 60.0
+    return max(0.0, 1.0 - elapsed / GAME_MINUTES)
+
+
+def _record(roster: Roster) -> str:
+    base = f"{roster.wins}-{roster.losses}"
+    return f"{base}-{roster.ties}" if roster.ties else base
 
 
 def _edge_reason(start: dict, sit: dict) -> str | None:
@@ -109,11 +128,10 @@ async def _player_cards(
     cards = []
     for p in players:
         proj = projections.get(p.id) or {}
-        # K/DEF are excluded from the recency-weighted skill-position model in
-        # compute_projections — those positions are too noisy for it. Fall back
-        # to a flat baseline (league-average starter output) so the matchup
-        # preview shows something instead of "No projection", and both sides'
-        # totals are comparable when both have a K/DEF slot.
+        # compute_projections covers K/DEF (flat kicker baseline, matchup-driven
+        # DEF), including zeroing them on a bye. This fallback only applies if a
+        # K/DEF somehow comes back without a projection, so both sides' totals
+        # stay comparable instead of showing "No projection".
         projected = proj.get("projected")
         if projected is None and p.position in ("K", "DEF"):
             projected = KDEF_BASELINE
@@ -124,6 +142,7 @@ async def _player_cards(
                 "position": p.position,
                 "team": p.team,
                 "injury_status": p.injury_status,
+                "bye": bool(proj.get("bye")),
                 "projected": projected,
                 "floor": proj.get("floor"),
                 "ceiling": proj.get("ceiling"),
@@ -256,33 +275,37 @@ async def _matchup_team(
     """Full display lineup, bench (with projections), and both a pre-game
     projected total and a LIVE expected total for one roster.
 
-    ``optimal`` picks the lineup: the user's side shows the projection-optimal
-    lineup (what they SHOULD start), while the opponent shows the lineup they
-    ACTUALLY set — so a player they benched (because he's Out, say) doesn't show
-    up as their starter.
+    ``optimal`` picks the pre-game lineup: the user's side shows the
+    projection-optimal lineup (what they SHOULD start), while the opponent shows
+    the lineup they ACTUALLY set. Once games are live, both sides show the
+    lineup actually set — that's the lineup the platform is scoring, so it's the
+    only one whose players' points add up to ``current_points``.
 
-    Live model: once a starter's NFL game has kicked off, his points are treated
-    as already banked in ``current_points`` (the platform's live team score), so
-    only starters yet to kick off still carry projection + variance. Before the
-    week (or when we have no kickoff times) this collapses to the pure
-    projection. K/DEF carry the league-average baseline, no variance."""
-    proj = await compute_projections(db, list(roster.players), conn.season)
+    Live model: ``current_points`` (the platform's live team score) already
+    banks everything scored so far, so each starter adds only the share of his
+    projection still to be played — all of it before kickoff, a shrinking share
+    while his game is on, none once it's final. Variance shrinks the same way.
+    Before the week (or with no kickoff times) this is the pure projection."""
+    scoring = conn.scoring_type or "ppr"
+    proj = await compute_projections(db, list(roster.players), conn.season, scoring)
     cards = await _player_cards(db, list(roster.players), proj)
     for c in cards:
         c["actual_points"] = live_scores.get(c["id"])
-    if optimal or not (roster.starters or []):
-        rows = _display_lineup(all_slots, cards)
+
+    # Only trust kickoff-based locking once the matchup is actually live (real
+    # current points). Otherwise stale/past game times would zero out players.
+    use_live = live and current_points is not None
+    starters = list(roster.starters or [])
+    if starters and (use_live or not optimal):
+        rows = _actual_lineup(all_slots, cards, starters)
     else:
-        rows = _actual_lineup(all_slots, cards, list(roster.starters or []))
+        rows = _display_lineup(all_slots, cards)
     started_ids = {r["player"]["id"] for r in rows if r["player"]}
     bench = sorted(
         (c for c in cards if c["id"] not in started_ids and c.get("projected") is not None),
         key=lambda c: -(c.get("projected") or 0),
     )
 
-    # Only trust kickoff-based locking once the matchup is actually live (real
-    # current points). Otherwise stale/past game times would zero out players.
-    use_live = live and current_points is not None
     proj_total = proj_var = 0.0
     remaining = remaining_var = 0.0
     for r in rows:
@@ -293,11 +316,13 @@ async def _matchup_team(
         sigma = (proj.get(p["id"]) or {}).get("stdev") or 0.0
         proj_total += pts
         proj_var += sigma**2
-        kickoff = kickoffs.get((p.get("team") or "").upper())
-        locked = use_live and kickoff is not None and kickoff <= now
-        if not locked:
-            remaining += pts
-            remaining_var += sigma**2
+        left = (
+            _remaining_fraction(kickoffs.get((p.get("team") or "").upper()), now)
+            if use_live
+            else 1.0
+        )
+        remaining += pts * left
+        remaining_var += (sigma**2) * left
 
     if use_live:
         expected_total = float(current_points) + remaining
@@ -311,7 +336,7 @@ async def _matchup_team(
         "bench": bench,
         "team_id": roster.team_id,
         "owner_name": roster.owner_name,
-        "record": f"{roster.wins}-{roster.losses}",
+        "record": _record(roster),
         "projected_total": round(proj_total, 1),
         "current_points": round(float(current_points), 1) if current_points is not None else None,
         "expected_total": round(expected_total, 1),
@@ -320,27 +345,44 @@ async def _matchup_team(
 
 
 async def _current_nfl_week(db: AsyncSession, season: int, now: datetime) -> int | None:
-    """The active NFL week from the schedule: the earliest week whose games
-    aren't all finished (a game is done ~4h after kickoff). Preseason → the
-    first week; after the finale → the last. ``None`` if no schedule is loaded.
+    """The active NFL week from the schedule (see schedule_service)."""
+    return await current_nfl_week(db, season, now)
 
-    Platform-agnostic — ESPN syncs the whole schedule up front and Sleeper only
-    the current week, so we can't infer the week from which matchups exist."""
-    rows = (
-        await db.execute(
-            select(NflSchedule.week, NflSchedule.game_time).where(
-                NflSchedule.season == season, NflSchedule.game_time.is_not(None)
-            )
-        )
-    ).all()
-    if not rows:
+
+async def resolve_current_matchup(
+    db: AsyncSession, conn: LeagueConnection, now: datetime | None = None
+) -> Matchup | None:
+    """The user's matchup for the current NFL week — the one definition of
+    "this week" shared by the matchup page, dashboard, game plan and chat.
+
+    Week comes from the NFL schedule, never from which scores happen to be zero
+    (a live week has points on the board, which used to flip everything to next
+    week's opponent mid-Sunday). If that week isn't synced yet, use the nearest
+    earlier week we have. With no schedule loaded, fall back to the earliest
+    week the user's matchup hasn't started, else the latest one."""
+    if not conn.team_id:
         return None
-    last_kick: dict[int, datetime] = {}
-    for week, game_time in rows:
-        if week not in last_kick or game_time > last_kick[week]:
-            last_kick[week] = game_time
-    unfinished = [w for w, kick in last_kick.items() if kick + timedelta(hours=4) > now]
-    return min(unfinished) if unfinished else max(last_kick)
+    matchups = (
+        await db.execute(
+            select(Matchup)
+            .where(Matchup.connection_id == conn.id)
+            .order_by(Matchup.week.asc())
+        )
+    ).scalars().all()
+    mine = [x for x in matchups if conn.team_id in (x.team_a_id, x.team_b_id)]
+    if not mine:
+        return None
+
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    by_week = {x.week: x for x in mine}
+    current_week = await current_nfl_week(db, conn.season, now)
+    if current_week is not None:
+        if current_week in by_week:
+            return by_week[current_week]
+        at_or_below = [w for w in by_week if w <= current_week]
+        return by_week[max(at_or_below)] if at_or_below else by_week[min(by_week)]
+    unplayed = [x for x in mine if not (x.team_a_points or x.team_b_points)]
+    return unplayed[0] if unplayed else mine[-1]
 
 
 async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dict:
@@ -351,32 +393,10 @@ async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dic
     if not conn.team_id:
         return {"status": "no_team"}
 
-    matchups = (
-        await db.execute(
-            select(Matchup)
-            .where(Matchup.connection_id == conn.id)
-            .order_by(Matchup.week.asc())
-        )
-    ).scalars().all()
-    mine = [x for x in matchups if conn.team_id in (x.team_a_id, x.team_b_id)]
-    if not mine:
-        return {"status": "no_matchup"}
-
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    by_week = {x.week: x for x in mine}
-    current_week = await _current_nfl_week(db, conn.season, now)
-    if current_week is not None and current_week in by_week:
-        m = by_week[current_week]
-    elif current_week is not None:
-        # Current week not synced yet: show the nearest week we do have at or
-        # below it (Refresh will pull the current one), else the earliest.
-        at_or_below = [w for w in by_week if w <= current_week]
-        m = by_week[max(at_or_below)] if at_or_below else by_week[min(by_week)]
-    else:
-        # No schedule loaded: fall back to the latest week we have. Sleeper only
-        # syncs the current week, so that's usually right; ESPN carries the full
-        # schedule (and game times), so this branch rarely triggers for it.
-        m = max(mine, key=lambda x: x.week)
+    m = await resolve_current_matchup(db, conn, now)
+    if m is None:
+        return {"status": "no_matchup"}
 
     async def _roster(team_id: str | None) -> Roster | None:
         if not team_id:
@@ -512,8 +532,9 @@ async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:
     if roster is None or not roster.players:
         return {"status": "empty_roster"}
 
+    scoring = conn.scoring_type or "ppr"
     all_ids = list(roster.players)
-    projections = await compute_projections(db, all_ids, conn.season)
+    projections = await compute_projections(db, all_ids, conn.season, scoring)
     cards = await _player_cards(db, all_ids, projections)
     projectable = [c for c in cards if c["projected"] is not None]
 
@@ -527,37 +548,37 @@ async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:
         key=lambda c: -(c.get("projected") or 0),
     )
 
-    # Swaps: optimal starters currently on the user's bench. Skill positions
-    # only — K/DEF are one-deep, so a start/sit call there is just noise.
+    # Swaps: every optimal starter the user isn't currently starting, paired
+    # with the current starter he should replace. Each benched-for player is
+    # used once — same position first, else anyone eligible for that slot (a
+    # FLEX upgrade can send a WR to the bench for an RB). Kicker start/sit is
+    # noise, but DEF has a real matchup projection, so streaming calls count.
     current_starters = set(roster.starters or [])
     swaps = []
     if current_starters:
-        optimal_ids = used_ids
+        outgoing = [
+            c for c in projectable
+            if c["id"] in current_starters and c["id"] not in used_ids
+        ]
+        paired: set[str] = set()
         for s in lineup:
             p = s["player"]
             if not p or p["id"] in current_starters:
                 continue
-            # Kicker start/sit is noise, but DEF now has a real matchup
-            # projection, so streaming calls there are worth surfacing.
             if (p.get("position") or "").upper() == "K":
                 continue
-            # Find the currently-started player at this position being displaced
+            eligible = FLEX_ELIGIBLE.get(s["slot"], {p["position"]})
+            open_out = [c for c in outgoing if c["id"] not in paired]
             displaced = next(
-                (
-                    c
-                    for c in projectable
-                    if c["id"] in current_starters
-                    and c["id"] not in optimal_ids
-                    and c["position"] == p["position"]
-                ),
-                None,
-            )
+                (c for c in open_out if c["position"] == p["position"]), None
+            ) or next((c for c in open_out if c["position"] in eligible), None)
             # Recommend the higher projection even by a hair; for near
             # toss-ups flag it close and name the contextual tiebreaker.
             gain = None
             close = False
             reason = None
             if displaced is not None:
+                paired.add(displaced["id"])
                 gain = round((p.get("projected") or 0) - (displaced.get("projected") or 0), 1)
                 close = gain < CLOSE_MARGIN
                 if close:
@@ -575,20 +596,11 @@ async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:
 
     my_total, my_var = _team_totals(lineup, projections)
 
-    # Opponent projection from this week's matchup, if synced. Prefer the
-    # earliest unplayed week — pre-season that's Week 1, mid-season it follows
-    # the live week — so the game plan doesn't stubbornly show the final week.
+    # Opponent projection for the current NFL week's matchup — the same week
+    # the matchup page shows, resolved from the schedule, not from which
+    # scores are still zero.
     opponent = None
-    matchups = (
-        await db.execute(
-            select(Matchup)
-            .where(Matchup.connection_id == conn.id)
-            .order_by(Matchup.week.asc())
-        )
-    ).scalars().all()
-    mine = [x for x in matchups if conn.team_id in (x.team_a_id, x.team_b_id)]
-    unplayed = [x for x in mine if not (x.team_a_points or x.team_b_points)]
-    m = unplayed[0] if unplayed else (mine[-1] if mine else None)
+    m = await resolve_current_matchup(db, conn)
     if m:
         opp_id = m.team_b_id if m.team_a_id == conn.team_id else m.team_a_id
         opp_roster = (
@@ -599,9 +611,16 @@ async def build_gameplan(db: AsyncSession, conn: LeagueConnection) -> dict:
             )
         ).scalar_one_or_none()
         if opp_roster and opp_roster.players:
-            opp_proj = await compute_projections(db, list(opp_roster.players), conn.season)
+            opp_proj = await compute_projections(
+                db, list(opp_roster.players), conn.season, scoring
+            )
             opp_cards = await _player_cards(db, list(opp_roster.players), opp_proj)
-            opp_lineup = _display_lineup(all_slots, opp_cards)
+            # You play the lineup they actually set, like the matchup page.
+            opp_lineup = (
+                _actual_lineup(all_slots, opp_cards, list(opp_roster.starters))
+                if opp_roster.starters
+                else _display_lineup(all_slots, opp_cards)
+            )
             opp_total, opp_var = _team_totals(opp_lineup, opp_proj)
             opponent = {
                 "name": opp_roster.owner_name,

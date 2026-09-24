@@ -22,8 +22,10 @@ from app.services.espn_service import (
     roster_positions_from_espn,
     scoring_type_from_espn,
 )
+from app.services.schedule_service import ensure_schedule
 from app.services.sleeper_service import SleeperClient
 from app.utils.constants import FANTASY_POSITIONS
+from app.utils.fantasy_math import scoring_type_from_settings
 from app.utils.player_id_map import espn_to_sleeper_map
 
 logger = logging.getLogger(__name__)
@@ -107,6 +109,20 @@ async def sync_player_pool(db: AsyncSession) -> int:
     return count
 
 
+def sleeper_points(settings: dict, field: str) -> float:
+    """Sleeper splits season points into an integer field and a hundredths
+    field (``fpts`` = 1617, ``fpts_decimal`` = 78 → 1617.78)."""
+    whole = settings.get(field) or 0
+    decimal = settings.get(f"{field}_decimal") or 0
+    return round(float(whole) + float(decimal) / 100.0, 2)
+
+
+def _sleeper_starters(raw: list | None) -> list[str]:
+    """Sleeper marks an empty starting slot with player id "0" — drop those so
+    they don't render as an "Unknown" starter."""
+    return [str(p) for p in (raw or []) if p and str(p) != "0"]
+
+
 async def sync_sleeper_league(db: AsyncSession, conn: LeagueConnection) -> None:
     client = SleeperClient()
     try:
@@ -124,6 +140,8 @@ async def sync_sleeper_league(db: AsyncSession, conn: LeagueConnection) -> None:
         conn.league_name = league.get("name")
         conn.scoring_settings = league.get("scoring_settings")
         conn.roster_positions = league.get("roster_positions")
+        # Keep the scoring format current if the commissioner changes it.
+        conn.scoring_type = scoring_type_from_settings(conn.scoring_settings)
 
     owner_names = {
         u["user_id"]: (u.get("metadata") or {}).get("team_name") or u.get("display_name")
@@ -151,12 +169,12 @@ async def sync_sleeper_league(db: AsyncSession, conn: LeagueConnection) -> None:
 
         roster.owner_name = owner_names.get(r.get("owner_id"))
         roster.players = players
-        roster.starters = [str(p) for p in (r.get("starters") or [])]
+        roster.starters = _sleeper_starters(r.get("starters"))
         roster.wins = settings.get("wins", 0)
         roster.losses = settings.get("losses", 0)
         roster.ties = settings.get("ties", 0)
-        roster.points_for = settings.get("fpts", 0) or 0
-        roster.points_against = settings.get("fpts_against", 0) or 0
+        roster.points_for = sleeper_points(settings, "fpts")
+        roster.points_against = sleeper_points(settings, "fpts_against")
 
         # Identify which roster belongs to the connected user
         if conn.platform_user_id and r.get("owner_id") == conn.platform_user_id:
@@ -494,3 +512,10 @@ async def sync_league(db: AsyncSession, conn: LeagueConnection) -> None:
         await sync_espn_league(db, conn)
     else:
         raise ValueError(f"Unsupported platform: {conn.platform}")
+    # Week resolution, bye weeks and odds matching all need the NFL schedule;
+    # load it once alongside the first league sync rather than waiting for
+    # someone to open the schedule page.
+    try:
+        await ensure_schedule(db, conn.season)
+    except Exception:  # noqa: BLE001 — a schedule outage mustn't fail the sync
+        logger.warning("NFL schedule load failed for %s", conn.season, exc_info=True)

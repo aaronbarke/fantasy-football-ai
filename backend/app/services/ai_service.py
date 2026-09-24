@@ -27,8 +27,9 @@ numbers come from — say so if it's a prior season.
 - matchup_difficulty: opponent defense vs the player's position. rank 1 = easiest \
 matchup (allows the most points), 32 = toughest. delta_vs_league_avg is how many \
 points above/below average that defense allows the position — quote it.
-- trade_value: 0-100 percentile of recency-weighted production at the position. \
-90+ is elite tier, 75-89 strong starter, 50-74 solid, under 50 depth.
+- trade_value: value over replacement at the position, on one scale across \
+positions (higher = more valuable). Elite players run 40-70+, startable \
+contributors 15-35, depth under 10.
 - upcoming_game: Vegas spread, implied team total (the best single predictor of \
 fantasy scoring), and weather. Implied total 25+ is a smash spot; under 19 is a \
 fade signal. Wind over 15 mph hurts passing; rain hurts catching.

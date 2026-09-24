@@ -41,15 +41,35 @@ RB_PASS_CATCH_MIN = 0.06
 DEPTH_WEIGHT = 0.05
 
 PASS_CATCHER_POSITIONS = {"WR", "TE", "RB"}
-_ABSENT_STATUSES = {"out", "doubtful", "injured reserve", "ir"}
+# Sleeper and ESPN spell these differently ("IR" vs "Injured Reserve", "Sus" vs
+# "Suspension"), so both spellings are listed. PUP / NFI / suspended players
+# aren't eligible to play at all, which makes them as absent as IR.
+_ABSENT_STATUSES = {
+    "out", "doubtful", "injured reserve", "ir",
+    "sus", "susp", "suspended", "suspension",
+    "pup", "pup-r", "pup-p", "physically unable to perform",
+    "nfi", "nfi-r", "nfi-a", "non-football injury",
+}
+# Absences that last weeks, not days — a trade or rest-of-season view should
+# treat these players as unavailable (a one-week "Out" shouldn't).
+_LONG_TERM_STATUSES = _ABSENT_STATUSES - {"out", "doubtful"}
 
 
 def _is_absent(status: str | None) -> bool:
-    """True for confirmed absences (Out / Doubtful / IR) — never Questionable."""
+    """True for confirmed absences (Out / Doubtful / IR / PUP / suspended) —
+    never Questionable."""
     if not status:
         return False
     s = status.strip().lower()
     return s in _ABSENT_STATUSES or "injured reserve" in s
+
+
+def is_long_term_absent(status: str | None) -> bool:
+    """IR / PUP / NFI / suspension — out for weeks, not just this game."""
+    if not status:
+        return False
+    s = status.strip().lower()
+    return s in _LONG_TERM_STATUSES or "injured reserve" in s
 
 
 def _redistribution_weight(target_share: float, depth_chart_order: int | None) -> float:

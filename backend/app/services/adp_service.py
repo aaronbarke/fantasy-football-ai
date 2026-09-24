@@ -49,7 +49,7 @@ CACHE_TTL = 6 * 3600
 # Bump when the cached record shape changes. Without this, a deploy that adds a
 # field keeps reading old-shaped entries for the whole TTL and silently drops
 # whatever the new field fed (this cost us the entire DEF match once already).
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 ESPN_PAGE_SIZE = 200
 ESPN_MAX_PLAYERS = 400
 DRAFTABLE_POSITIONS = {"QB", "RB", "WR", "TE", "K", "DEF"}
@@ -95,6 +95,41 @@ def _season_totals(stats: list[dict], season: int) -> tuple[float | None, float 
     return projected, prior_actual
 
 
+# ESPN stat id for receptions inside a stats entry's "stats" map.
+ESPN_STAT_RECEPTIONS = "53"
+# Points per reception in each of our formats. ESPN's draft-default league
+# (leaguedefaults/3) is full PPR, so its projection carries 1.0 per catch.
+PPR_BY_SCORING = {"ppr": 1.0, "half_ppr": 0.5, "standard": 0.0}
+
+
+def _projected_receptions(stats: list[dict], season: int) -> float | None:
+    """Projected season receptions from the same season-projection entry
+    ``_season_totals`` reads its point total from."""
+    for s in stats or []:
+        if (
+            s.get("statSplitTypeId") == 0
+            and s.get("scoringPeriodId") == 0
+            and s.get("statSourceId") == 1
+            and s.get("seasonId") == season
+        ):
+            rec = (s.get("stats") or {}).get(ESPN_STAT_RECEPTIONS)
+            return float(rec) if rec is not None else None
+    return None
+
+
+def espn_projection_for(payload: dict, scoring: str) -> float | None:
+    """ESPN's (PPR) season projection converted to ``scoring`` by taking the
+    reception points back out. Without this, half-PPR and standard boards blend
+    a PPR number into non-PPR history and overrate every pass-catcher."""
+    proj = payload.get("season_proj")
+    if proj is None:
+        return None
+    rec = payload.get("season_proj_rec")
+    if rec is None:
+        return proj
+    return round(proj - (1.0 - PPR_BY_SCORING.get(scoring, 1.0)) * rec, 1)
+
+
 async def fetch_espn_draft_data(season: int) -> dict[str, dict]:
     """espn_id → {adp, auction_value, percent_owned, season_proj, prior_actual}."""
     key = f"espnadp:v{CACHE_VERSION}:{season}"
@@ -131,6 +166,7 @@ async def fetch_espn_draft_data(season: int) -> dict[str, dict]:
                         "auction_value": float(auction) if auction else None,
                         "percent_owned": float(own.get("percentOwned") or 0) or None,
                         "season_proj": projected,
+                        "season_proj_rec": _projected_receptions(p.get("stats"), season),
                         "prior_actual": prior_actual,
                     }
     except (httpx.HTTPError, ValueError, KeyError):
@@ -311,7 +347,7 @@ async def sync_draft_profiles(db: AsyncSession, season: int) -> int:
             profile.bye_week = f.get("bye")
             profile.auction_value = e.get("auction_value")
             profile.percent_owned = e.get("percent_owned")
-            profile.espn_season_proj = e.get("season_proj")
+            profile.espn_season_proj = espn_projection_for(e, scoring)
             profile.prior_season_actual = e.get("prior_actual")
             written += 1
 

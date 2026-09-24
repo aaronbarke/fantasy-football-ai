@@ -48,7 +48,9 @@ TRADE_QUESTION = (
     "verdict hinges on roster fit, not raw value.\n"
     "- Gap 8-20%: meaningful edge. Winner gets a full letter grade above loser.\n"
     "- Gap over 20%: lopsided. The losing side cannot grade above C, and you "
-    "should propose a specific counter using trade.sweetener_candidates.\n"
+    "should propose a specific counter: if the user is winning, have them add "
+    "from trade.sweetener_candidates; if the user is losing, have them ask for "
+    "one of trade.ask_for_candidates (players on the other team's roster).\n"
     "- Positional scarcity is already priced into the values (VOR), so trust the "
     "totals; still flag when a trade guts a roster's last startable depth at a "
     "position, and weigh a rising/falling trend when the call is close. "
@@ -121,8 +123,19 @@ async def analyze_trade(
     if conn is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "League connection not found")
 
+    # A player can't be on both sides, or twice on one side — that would
+    # silently double-count his value.
+    give_ids, recv_ids = list(dict.fromkeys(body.give)), list(dict.fromkeys(body.receive))
+    if len(give_ids) != len(body.give) or len(recv_ids) != len(body.receive):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A player is listed twice")
+    if set(give_ids) & set(recv_ids):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "A player can't be on both sides of a trade"
+        )
+
     scoring_type = conn.scoring_type or "ppr"
-    values = await compute_player_values(db)
+    values = await compute_player_values(db, scoring_type)
+    positions: dict[str, str | None] = {}
 
     name_cache: dict[str, str] = {}
 
@@ -133,6 +146,7 @@ async def analyze_trade(
             if player is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, f"Player {pid} not found")
             name_cache[pid] = player.full_name
+            positions[pid] = player.position
             pkg = await player_package(db, player, conn.season, scoring_type)
             pkg["trade_value"] = values.get(pid, {}).get("value")
             out.append(pkg)
@@ -193,12 +207,10 @@ async def analyze_trade(
         # (does this thin a position or fill a need?).
         valued_pos = {"QB", "RB", "WR", "TE"}
         before = Counter(p.position for p in players if p.position in valued_pos)
-        given = Counter(
-            values.get(pid, {}).get("position") for pid in body.give
-        )
-        received = Counter(
-            values.get(pid, {}).get("position") for pid in body.receive
-        )
+        # Positions from the player table, not the value model — players with
+        # no trade value yet (rookies, too few games) still change your depth.
+        given = Counter(positions.get(pid) for pid in body.give)
+        received = Counter(positions.get(pid) for pid in body.receive)
         touched = {p for p in (*given, *received) if p in valued_pos}
         context["trade"]["roster_fit"] = {
             pos: {
@@ -228,6 +240,42 @@ async def analyze_trade(
             ]
             context["trade"]["sweetener_candidates"] = [
                 {"name": s.name, "trade_value": s.value} for s in sweeteners
+            ]
+
+    # The user is on the losing end: the counter is to ask for more, so offer
+    # the AI real players from the other side's roster to request.
+    if diff < 0 and gap_pct >= EVEN_GAP_PCT:
+        partner = next(
+            (
+                r
+                for r in (
+                    await db.execute(select(Roster).where(Roster.connection_id == conn.id))
+                ).scalars().all()
+                if r.team_id != conn.team_id
+                and set(body.receive) & set(r.players or [])
+            ),
+            None,
+        )
+        if partner:
+            in_trade = set(body.give) | set(body.receive)
+            asks = sorted(
+                (
+                    (pid, values[pid]["value"])
+                    for pid in partner.players or []
+                    if pid in values and pid not in in_trade
+                ),
+                key=lambda c: abs(c[1] - abs(diff)),
+            )[:3]
+            ask_players = {
+                p.id: p
+                for p in (
+                    await db.execute(select(Player).where(Player.id.in_([a for a, _ in asks])))
+                ).scalars().all()
+            } if asks else {}
+            context["trade"]["ask_for_candidates"] = [
+                {"name": ask_players[pid].full_name, "trade_value": v}
+                for pid, v in asks
+                if pid in ask_players
             ]
 
     analysis = await generate_response(TRADE_QUESTION, context)

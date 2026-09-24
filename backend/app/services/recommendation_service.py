@@ -2,7 +2,7 @@
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import PlayerStatsWeekly, Recommendation
@@ -14,6 +14,22 @@ FP_FIELD = {
     "half_ppr": "fantasy_points_half",
     "standard": "fantasy_points_std",
 }
+
+
+async def _week_loaded(db: AsyncSession, season: int, week: int) -> bool:
+    """True once any stats for that week are in — i.e. the week has been played
+    and ingested, so a player with no row simply didn't record a stat."""
+    return bool(
+        (
+            await db.execute(
+                select(
+                    exists().where(
+                        PlayerStatsWeekly.season == season, PlayerStatsWeekly.week == week
+                    )
+                )
+            )
+        ).scalar()
+    )
 
 
 async def _points_for(
@@ -46,15 +62,24 @@ async def evaluate_pending(db: AsyncSession) -> int:
         .all()
     )
     graded = 0
+    loaded: dict[tuple[int, int], bool] = {}
     for rec in pending:
+        key = (rec.season, rec.week)
+        if key not in loaded:
+            loaded[key] = await _week_loaded(db, rec.season, rec.week)
+        if not loaded[key]:
+            continue  # the week's stats aren't in yet
+        # nflverse only has rows for players who recorded a stat, so once the
+        # week is loaded a missing row means he didn't play: 0 points. Leaving
+        # it pending forever would hide exactly the calls that went worst.
         picked = await _points_for(
             db, rec.picked_player_id, rec.season, rec.week, rec.scoring_type
         )
         alt = await _points_for(
             db, rec.alternative_player_id, rec.season, rec.week, rec.scoring_type
         )
-        if picked is None or alt is None:
-            continue  # stats not in yet
+        picked = picked if picked is not None else 0.0
+        alt = alt if alt is not None else 0.0
         rec.picked_points = picked
         rec.alternative_points = alt
         if picked > alt:

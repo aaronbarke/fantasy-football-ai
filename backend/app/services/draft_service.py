@@ -82,11 +82,20 @@ MIN_GAMES_FOR_HISTORY = 3
 # prices these in (a PUP tight end projects far below his healthy history), but
 # our recency-weighted history does not — so for these, history may only drag a
 # projection DOWN, never inflate it above ESPN's number.
-SERIOUS_INJURY = {"ir", "pup", "out", "suspended", "susp", "nfi", "doubtful"}
+# Sleeper and ESPN spellings both appear in Player.injury_status.
+SERIOUS_INJURY = {
+    "ir", "injured reserve", "pup", "physically unable to perform", "out",
+    "suspended", "susp", "sus", "suspension", "nfi", "non-football injury", "doubtful",
+}
 # Fallback season multiplier on history when a hurt player has no ESPN number to
 # anchor to — rough games-missed haircuts, worst designations cutting deepest.
 INJURY_HISTORY_DISCOUNT = {
     "ir": 0.20,
+    "injured reserve": 0.20,
+    "non-football injury": 0.40,
+    "suspension": 0.45,
+    "sus": 0.45,
+    "physically unable to perform": 0.55,
     "nfi": 0.40,
     "suspended": 0.45,
     "susp": 0.45,
@@ -189,7 +198,13 @@ BYE_CONFLICT_FLOOR = 2  # one shared bye is normal; three is a problem
 VALUE_NOTABLE = 15.0  # value_score worth mentioning in the reasons
 # ESPN-vs-sharp ADP gap (picks) big enough to call out as a market edge.
 MARKET_EDGE_NOTABLE = 18.0
-INJURY_PENALTY = {"out": 30.0, "ir": 45.0, "doubtful": 20.0, "questionable": 5.0}
+INJURY_PENALTY = {
+    "out": 30.0,
+    "ir": 45.0,
+    "injured reserve": 45.0,
+    "doubtful": 20.0,
+    "questionable": 5.0,
+}
 
 
 def starters_per_team(roster_positions: list[str] | None) -> dict[str, float]:

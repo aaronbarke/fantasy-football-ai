@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -101,7 +101,7 @@ async def sleeper_lookup(body: SleeperLookupRequest, _: User = Depends(get_curre
 @router.post("/connect", response_model=LeagueConnectionResponse, status_code=201)
 async def connect_league(
     body: ConnectLeagueRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(block_demo),
     db: AsyncSession = Depends(get_db),
 ):
     if body.platform not in ("sleeper", "espn"):
@@ -207,7 +207,7 @@ async def trigger_sync(
 @router.delete("/{connection_id}", status_code=204)
 async def disconnect_league(
     connection_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(block_demo),
     db: AsyncSession = Depends(get_db),
 ):
     conn = await _get_user_connection(db, user, connection_id)
@@ -296,7 +296,12 @@ async def get_standings(
         )
         for r in rosters
     ]
-    return sorted(entries, key=lambda e: (-e.wins, -e.points_for))
+    def win_pct(e: StandingsEntry) -> float:
+        games = e.wins + e.losses + e.ties
+        return (e.wins + 0.5 * e.ties) / games if games else 0.0
+
+    # Ties count as half a win (5-0-1 ranks above 5-1-0); points for breaks ties.
+    return sorted(entries, key=lambda e: (-win_pct(e), -e.wins, -e.points_for))
 
 
 @router.get("/{connection_id}/matchup", response_model=MatchupResponse)
@@ -305,24 +310,15 @@ async def get_matchup(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.services.gameplan_service import resolve_current_matchup
+
     conn = await _get_user_connection(db, user, connection_id)
-    # Prefer the current/upcoming week (earliest with no points on the board).
-    # Before Week 1 that's Week 1; mid-season it's whichever week is currently
-    # live. Only fall back to the max week (final week already scored) so we
-    # never 404 when the season is over.
-    latest_week = (
-        await db.execute(
-            select(Matchup.week)
-            .where(
-                Matchup.connection_id == conn.id,
-                (Matchup.team_a_points == 0) & (Matchup.team_b_points == 0),
-            )
-            .order_by(Matchup.week.asc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if latest_week is None:
-        latest_week = (
+    # The current NFL week's matchup — the same one the Matchup page and game
+    # plan show. (Picking "the earliest week nobody has scored in yet" jumped to
+    # next week's opponent as soon as Sunday's games put points on the board.)
+    m = await resolve_current_matchup(db, conn)
+    if m is None:
+        any_week = (
             await db.execute(
                 select(Matchup.week)
                 .where(Matchup.connection_id == conn.id)
@@ -330,21 +326,9 @@ async def get_matchup(
                 .limit(1)
             )
         ).scalar_one_or_none()
-    if latest_week is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No matchup data — sync the league")
-
-    m = (
-        await db.execute(
-            select(Matchup).where(
-                Matchup.connection_id == conn.id,
-                Matchup.week == latest_week,
-                or_(
-                    Matchup.team_a_id == conn.team_id,
-                    Matchup.team_b_id == conn.team_id,
-                ),
-            )
-        )
-    ).scalar_one_or_none()
+        if any_week is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No matchup data — sync the league")
+    latest_week = m.week if m else any_week
 
     async def roster_resp(team_id: str | None) -> RosterResponse | None:
         if team_id is None:
@@ -523,7 +507,9 @@ async def get_waivers(
                 "injury_status": p.injury_status,
             },
             trending_count=ap.trending_count,
-            recent_ppr_avg=float(ap.recent_ppr_avg) if ap.recent_ppr_avg else None,
+            recent_ppr_avg=(
+                float(ap.recent_ppr_avg) if ap.recent_ppr_avg is not None else None
+            ),
         )
         for ap, p in rows
     ]
