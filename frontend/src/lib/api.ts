@@ -16,6 +16,20 @@ export function clearTokens() {
   localStorage.removeItem("selected_league");
 }
 
+// Per-account state pages keep in localStorage. Cleared on an explicit sign-out
+// so the next person on this browser doesn't inherit it — but not on a lapsed
+// session, where the same user is about to sign straight back in mid-draft.
+const ACCOUNT_STATE_KEYS = [
+  "draft_room_state",
+  "draft_room_settings",
+  "mock_draft_active_id",
+];
+
+export function signOut() {
+  clearTokens();
+  for (const key of ACCOUNT_STATE_KEYS) localStorage.removeItem(key);
+}
+
 export function getSelectedLeague(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("selected_league");
@@ -23,6 +37,21 @@ export function getSelectedLeague(): string | null {
 
 export function setSelectedLeague(id: string) {
   localStorage.setItem("selected_league", id);
+}
+
+/** The message in a FastAPI error body: a string, or for validation errors a
+ * list of {msg} entries. */
+export function errorDetail(body: unknown, fallback: string): string {
+  const detail = (body as { detail?: unknown } | null)?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const msgs = detail
+      .map((d) => (d as { msg?: unknown })?.msg)
+      .filter((m): m is string => typeof m === "string")
+      .map((m) => m.replace(/^Value error, /, ""));
+    if (msgs.length) return msgs.join("; ");
+  }
+  return fallback;
 }
 
 export class ApiError extends Error {
@@ -69,8 +98,7 @@ export async function api<T>(
   if (!resp.ok) {
     let detail = resp.statusText;
     try {
-      const body = await resp.json();
-      detail = body.detail || detail;
+      detail = errorDetail(await resp.json(), detail);
     } catch {
       /* non-JSON error body */
     }
@@ -111,7 +139,7 @@ export async function apiStream(
   if (!resp.ok || !resp.body) {
     let detail = resp.statusText;
     try {
-      detail = (await resp.json()).detail || detail;
+      detail = errorDetail(await resp.json(), detail);
     } catch {
       /* non-JSON */
     }

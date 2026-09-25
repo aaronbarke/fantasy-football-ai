@@ -15,6 +15,9 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=build /app ./
+# Owned by the image's unprivileged `node` user, which runs the server (it
+# needs to write .next/cache).
+COPY --from=build --chown=node:node /app ./
+USER node
 EXPOSE 3000
 CMD ["sh", "-c", "npm run start -- -p ${PORT:-3000}"]

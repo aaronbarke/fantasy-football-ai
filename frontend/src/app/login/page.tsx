@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { setTokens } from "@/lib/api";
+import { errorDetail, setTokens } from "@/lib/api";
 import type { TokenResponse } from "@/lib/types";
 import { ArrowRight, Sparkles } from "lucide-react";
 import Brand from "@/components/Brand";
@@ -60,7 +60,7 @@ export default function LoginPage() {
       });
       if (!resp.ok) {
         const b = await resp.json().catch(() => ({}));
-        throw new Error(b.detail || "Something went wrong");
+        throw new Error(errorDetail(b, "Something went wrong"));
       }
       finish(await resp.json());
     } catch (err) {

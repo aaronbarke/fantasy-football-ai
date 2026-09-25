@@ -1,7 +1,6 @@
 import type { ChatMessage as ChatMessageType } from "@/lib/types";
 import { Bot, User } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import AiMarkdown from "@/components/AiMarkdown";
 
 export default function ChatMessage({ message }: { message: ChatMessageType }) {
   const isUser = message.role === "user";
@@ -24,8 +23,7 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
         {isUser ? (
           message.content
         ) : (
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+          <AiMarkdown
             components={{
               table: ({ children }) => (
                 <div className="mb-2 overflow-x-auto">
@@ -65,7 +63,7 @@ export default function ChatMessage({ message }: { message: ChatMessageType }) {
             }}
           >
             {message.content}
-          </ReactMarkdown>
+          </AiMarkdown>
         )}
       </div>
     </div>
