@@ -24,7 +24,7 @@ from app.services.live_draft_service import (
     espn_live_draft_state,
 )
 from app.services.news_service import recent_news_by_player
-from app.utils.security import get_current_user
+from app.utils.security import ai_quota, get_current_user
 
 router = APIRouter(prefix="/api/draft", tags=["draft"])
 
@@ -82,12 +82,16 @@ def candidate_context(pick: dict, news: list[dict]) -> dict:
     }
 
 
+# Upper bound on player-id lists: a 32-team, 30-round draft is 960 picks.
+MAX_DRAFT_PICKS = 1000
+
+
 class RecommendRequest(BaseModel):
     connection_id: str | None = None
     scoring: str | None = None
     league_size: int | None = Field(default=None, ge=4, le=32)
-    my_player_ids: list[str] = Field(default_factory=list)
-    drafted_ids: list[str] = Field(default_factory=list)
+    my_player_ids: list[str] = Field(default_factory=list, max_length=MAX_DRAFT_PICKS)
+    drafted_ids: list[str] = Field(default_factory=list, max_length=MAX_DRAFT_PICKS)
     next_pick: int | None = Field(default=None, ge=1)
     following_pick: int | None = Field(default=None, ge=1)
     rounds: int | None = Field(default=None, ge=1, le=30)
@@ -252,22 +256,21 @@ async def live_draft(
 
 @router.get("/live-external")
 async def live_draft_external(
-    espn_league_id: str = Query(..., min_length=1),
-    season: int | None = None,
-    espn_s2: str | None = None,
-    swid: str | None = None,
-    team_id: str | None = None,
+    espn_league_id: str = Query(..., pattern=r"^\d{1,20}$"),
+    season: int | None = Query(default=None, ge=2000, le=2100),
+    team_id: str | None = Query(default=None, pattern=r"^\d{1,10}$"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Live draft state for any ESPN league by ID — no saved connection needed.
+    """Live draft state for any public ESPN league by ID — no saved connection
+    needed.
 
     Use this to sync a standalone ESPN Mock Draft Lobby draft: join the lobby,
-    grab the league ID from the URL, and paste it here."""
+    grab the league ID from the URL, and paste it here. Private leagues go
+    through a saved connection (/connect) instead: their session cookies must
+    never ride in a URL, where access logs and proxies record them."""
     season = season or get_settings().current_season
-    return await espn_external_draft_state(
-        db, espn_league_id, season, espn_s2, swid, team_id
-    )
+    return await espn_external_draft_state(db, espn_league_id, season, None, None, team_id)
 
 
 @router.post("/recommend")
@@ -318,7 +321,7 @@ async def draft_recommend(
 @router.post("/advice")
 async def draft_advice(
     body: RecommendRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(ai_quota),
     db: AsyncSession = Depends(get_db),
 ):
     """The same recommendation, written up by Claude."""

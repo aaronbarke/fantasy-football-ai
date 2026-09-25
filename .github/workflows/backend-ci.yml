@@ -7,6 +7,10 @@ on:
   pull_request:
     paths: ["backend/**"]
 
+# Read-only token: these jobs only check out and test code.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -23,7 +27,8 @@ jobs:
         run: |
           pip install fastapi 'uvicorn[standard]' 'sqlalchemy[asyncio]' aiosqlite \
             alembic pydantic pydantic-settings email-validator httpx anthropic \
-            'apscheduler<4' redis PyJWT bcrypt python-dateutil pytest pytest-asyncio ruff
+            'apscheduler<4' redis PyJWT bcrypt cryptography python-dateutil pytest \
+            pytest-asyncio ruff
       - name: Lint
         run: ruff check app tests
       - name: Test

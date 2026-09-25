@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/players", tags=["players"])
 
 @router.get("/search", response_model=list[PlayerOut])
 async def search_players(
-    q: str = Query(min_length=2),
+    q: str = Query(min_length=2, max_length=64),
     _: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -70,9 +70,9 @@ async def trending_players(
 
 @router.get("/rankings")
 async def player_rankings(
-    position: str | None = None,
-    season: int | None = None,
-    limit: int = 200,
+    position: str | None = Query(default=None, max_length=5),
+    season: int | None = Query(default=None, ge=2000, le=2100),
+    limit: int = Query(default=200, ge=1, le=400),
     _: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -93,7 +93,7 @@ async def player_rankings(
         .group_by(Player.id)
         .having(games_col >= 4)
         .order_by(avg_col.desc())
-        .limit(min(limit, 400))
+        .limit(limit)
     )
     if position:
         query = query.where(Player.position == position.upper())

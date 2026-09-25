@@ -4,6 +4,7 @@ import secrets
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -16,12 +17,16 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
 )
+from app.utils.limits import login_failures
 from app.utils.security import (
     DEMO_EMAIL,
+    UNUSABLE_PASSWORD_PREFIX,
     create_access_token,
     create_refresh_token,
-    decode_token,
+    decode_claims,
+    has_usable_password,
     hash_password,
+    user_for_claims,
     verify_password,
 )
 
@@ -30,20 +35,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
+GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
+
+# Failed sign-ins allowed per account before it's paused (on top of the per-IP
+# limit on /api/auth), so a password can't be guessed from many addresses.
+LOGIN_FAILURE_LIMIT = 10
+LOGIN_FAILURE_WINDOW = 15 * 60
 
 
-def _tokens_for(user: User) -> TokenResponse:
-    uid = str(user.id)
+def _tokens_for(user: User, extra: dict | None = None) -> TokenResponse:
     return TokenResponse(
-        access_token=create_access_token(uid),
-        refresh_token=create_refresh_token(uid),
+        access_token=create_access_token(user, extra),
+        refresh_token=create_refresh_token(user, extra),
     )
 
 
 def _unusable_password_hash() -> str:
-    """A hash of a random secret — satisfies the NOT NULL column for accounts
-    that authenticate via Google/demo and never use a password."""
-    return hash_password(secrets.token_urlsafe(32))
+    """Satisfies the NOT NULL column for accounts that authenticate via
+    Google/demo and never use a password; no password can match it."""
+    return UNUSABLE_PASSWORD_PREFIX + secrets.token_urlsafe(32)
 
 
 async def _get_or_create_user(db: AsyncSession, email: str) -> User:
@@ -86,17 +96,31 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
     user = User(email=body.email.lower(), password_hash=hash_password(body.password))
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:  # a concurrent signup took the address first
+        await db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
     return _tokens_for(user)
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    user = (
-        await db.execute(select(User).where(User.email == body.email.lower()))
-    ).scalar_one_or_none()
-    if user is None or not verify_password(body.password, user.password_hash):
+    email = body.email.lower()
+    throttle_key = f"login:{email}"
+    if login_failures.count(throttle_key, LOGIN_FAILURE_WINDOW) >= LOGIN_FAILURE_LIMIT:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many failed sign-ins for this account — try again in 15 minutes.",
+        )
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    # verify_password runs even for unknown emails, so timing doesn't tell
+    # an attacker which addresses have accounts.
+    valid = verify_password(body.password, user.password_hash if user else None)
+    if user is None or not valid:
+        login_failures.add(throttle_key)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+    login_failures.reset(throttle_key)
     return _tokens_for(user)
 
 
@@ -130,6 +154,8 @@ async def google_auth(body: GoogleAuthRequest, db: AsyncSession = Depends(get_db
     claims = resp.json()
     if claims.get("aud") != settings.google_client_id:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Google token audience mismatch.")
+    if claims.get("iss") not in GOOGLE_ISSUERS:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Google token issuer mismatch.")
     if str(claims.get("email_verified", "")).lower() != "true":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Google email is not verified.")
     email = claims.get("email")
@@ -137,6 +163,14 @@ async def google_auth(body: GoogleAuthRequest, db: AsyncSession = Depends(get_db
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Google token has no email.")
 
     user = await _get_or_create_user(db, email)
+    if has_usable_password(user):
+        # Registration doesn't verify email ownership, so this password may
+        # have been set by someone who signed up with the address first,
+        # waiting for its owner to arrive via Google. Google just proved
+        # ownership: retire the password, which also ends every session
+        # issued under it.
+        user.password_hash = _unusable_password_hash()
+        await db.commit()
     return _tokens_for(user)
 
 
@@ -150,17 +184,13 @@ async def demo_login(db: AsyncSession = Depends(get_db)):
         await _ensure_demo_league(db, user)
     except Exception:
         logger.exception("Demo league check failed")
-    return _tokens_for(user)
+    # Everyone shares the demo account, so each visit gets its own session id
+    # to keep one visitor's chat apart from the next.
+    return _tokens_for(user, {"sid": secrets.token_urlsafe(16)})
 
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    import uuid
-
-    user_id = decode_token(body.refresh_token, expected_type="refresh")
-    user = (
-        await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
-    return _tokens_for(user)
+    claims = decode_claims(body.refresh_token, expected_type="refresh")
+    user = await user_for_claims(db, claims)
+    return _tokens_for(user, {"sid": claims["sid"]} if claims.get("sid") else None)

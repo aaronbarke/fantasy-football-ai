@@ -13,6 +13,7 @@ apscheduler>=3.10,<4
 redis>=5.0
 PyJWT>=2.8
 bcrypt>=4.1
+cryptography>=43
 pandas>=2.0
 pyarrow>=15.0
 python-dateutil>=2.9

@@ -12,7 +12,7 @@ from app.services.ai_service import generate_response
 from app.services.context_builder import player_package
 from app.services.trade_finder_service import find_trades
 from app.services.value_service import compute_player_values, side_total
-from app.utils.security import get_current_user
+from app.utils.security import ai_quota, get_current_user
 
 router = APIRouter(prefix="/api/trade", tags=["trade"])
 
@@ -106,7 +106,7 @@ class TradeResponse(BaseModel):
 @router.post("/analyze", response_model=TradeResponse)
 async def analyze_trade(
     body: TradeRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(ai_quota),
     db: AsyncSession = Depends(get_db),
 ):
     try:

@@ -8,7 +8,7 @@ from app.database import get_db
 from app.models import LeagueConnection, User
 from app.services.ai_service import generate_response
 from app.services.gameplan_service import build_gameplan
-from app.utils.security import get_current_user
+from app.utils.security import ai_quota, get_current_user
 
 router = APIRouter(prefix="/api/gameplan", tags=["gameplan"])
 
@@ -56,7 +56,7 @@ async def get_gameplan(
 @router.post("/{connection_id}/brief")
 async def gameplan_brief(
     connection_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(ai_quota),
     db: AsyncSession = Depends(get_db),
 ):
     conn = await _get_conn(db, user, connection_id)

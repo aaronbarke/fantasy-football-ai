@@ -2,8 +2,10 @@ import json
 import logging
 import re
 import uuid
+from collections import OrderedDict
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +17,7 @@ from app.schemas.chat import ChatHistoryMessage, ChatRequest, ChatResponse
 from app.services.ai_service import generate_response, stream_response
 from app.services.context_builder import build_context
 from app.services.sleeper_service import SleeperClient
-from app.utils.security import get_current_user
+from app.utils.security import ai_quota, get_current_user, is_demo
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,48 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 HISTORY_TURNS = 8  # prior messages included for conversation continuity
 
 PICK_RE = re.compile(r"\n?PICK:\s*(.+?)\s*$")
+
+# Every demo visitor signs into the same account, so demo conversations can't
+# live in the shared chat_messages rows (each visitor would read — and feed the
+# AI — everyone else's questions). They're kept in memory per demo session
+# (the token's `sid`) and league instead, and dropped oldest-first.
+DEMO_SESSIONS_MAX = 2000
+DEMO_MESSAGES_MAX = 50
+_demo_chats: "OrderedDict[str, list[dict]]" = OrderedDict()
+
+
+def _demo_key(request: Request, user: User, connection_id: str | None) -> str | None:
+    """Memory key for a demo visitor's thread in one league; None for real
+    accounts (their history is in the database) or a demo token without a
+    session id (nothing to scope it to, so it gets no history)."""
+    if not is_demo(user):
+        return None
+    sid = (getattr(request.state, "token_claims", None) or {}).get("sid")
+    return f"{sid}:{connection_id or ''}" if sid else None
+
+
+def _demo_messages(key: str | None) -> list[dict]:
+    if key is None or key not in _demo_chats:
+        return []
+    _demo_chats.move_to_end(key)
+    return _demo_chats[key]
+
+
+def _demo_append(key: str | None, question: str, answer: str, intent: str) -> None:
+    if key is None:
+        return
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    thread = _demo_chats.setdefault(key, [])
+    _demo_chats.move_to_end(key)
+    thread.extend(
+        [
+            {"role": "user", "content": question, "intent": intent, "created_at": now},
+            {"role": "assistant", "content": answer, "intent": intent, "created_at": now},
+        ]
+    )
+    del thread[:-DEMO_MESSAGES_MAX]
+    while len(_demo_chats) > DEMO_SESSIONS_MAX:
+        _demo_chats.popitem(last=False)
 
 
 async def _resolve_connection(
@@ -48,8 +92,13 @@ async def _resolve_connection(
 
 
 async def _load_history(
-    db: AsyncSession, user: User, conn: LeagueConnection | None
+    db: AsyncSession, user: User, conn: LeagueConnection | None, demo_key: str | None = None
 ) -> list[dict[str, str]]:
+    if is_demo(user):
+        return [
+            {"role": m["role"], "content": m["content"]}
+            for m in _demo_messages(demo_key)[-HISTORY_TURNS:]
+        ]
     query = select(ChatMessage).where(ChatMessage.user_id == user.id)
     # Scope conversation history to the active league so context doesn't bleed
     query = query.where(
@@ -92,7 +141,13 @@ async def _store_turn(
     intent: str,
     context: dict,
     pick_name: str | None,
+    demo_key: str | None = None,
 ) -> None:
+    if is_demo(user):
+        # Not persisted: see _demo_chats. The accuracy tracker is skipped too,
+        # since its record would be shared by every demo visitor.
+        _demo_append(demo_key, question, answer, intent)
+        return
     db.add(
         ChatMessage(
             user_id=user.id,
@@ -154,31 +209,37 @@ async def _store_turn(
 @router.post("", response_model=ChatResponse)
 async def chat(
     body: ChatRequest,
-    user: User = Depends(get_current_user),
+    request: Request,
+    user: User = Depends(ai_quota),
     db: AsyncSession = Depends(get_db),
 ):
     conn = await _resolve_connection(db, user, body.connection_id)
+    demo_key = _demo_key(request, user, str(conn.id) if conn else None)
     intent, context = await build_context(db, conn, body.message)
-    history = [] if body.fresh else await _load_history(db, user, conn)
+    history = [] if body.fresh else await _load_history(db, user, conn, demo_key)
     track = _should_track_pick(intent, context)
 
     raw = await generate_response(body.message, context, history, require_pick=track)
     answer, pick_name = _extract_pick(raw) if track else (raw, None)
 
-    await _store_turn(db, user, conn, body.message, answer, intent, context, pick_name)
+    await _store_turn(
+        db, user, conn, body.message, answer, intent, context, pick_name, demo_key
+    )
     return ChatResponse(response=answer, intent=intent, context_used=context)
 
 
 @router.post("/stream")
 async def chat_stream(
     body: ChatRequest,
-    user: User = Depends(get_current_user),
+    request: Request,
+    user: User = Depends(ai_quota),
     db: AsyncSession = Depends(get_db),
 ):
     """Server-sent events: data: {"text": ...} chunks, then data: [DONE]."""
     conn = await _resolve_connection(db, user, body.connection_id)
+    demo_key = _demo_key(request, user, str(conn.id) if conn else None)
     intent, context = await build_context(db, conn, body.message)
-    history = [] if body.fresh else await _load_history(db, user, conn)
+    history = [] if body.fresh else await _load_history(db, user, conn, demo_key)
     track = _should_track_pick(intent, context)
 
     async def event_gen():
@@ -189,16 +250,19 @@ async def chat_stream(
             ):
                 chunks.append(delta)
                 yield f"data: {json.dumps({'text': delta})}\n\n"
-        except Exception as exc:
+        except Exception:
+            # Details go to the log, not the browser (they can name upstream
+            # accounts, request ids and quota state).
             logger.exception("Chat stream failed")
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            message = "The AI service hit an error — try again in a moment."
+            yield f"data: {json.dumps({'error': message})}\n\n"
             return
 
         raw = "".join(chunks)
         answer, pick_name = _extract_pick(raw) if track else (raw, None)
         try:
             await _store_turn(
-                db, user, conn, body.message, answer, intent, context, pick_name
+                db, user, conn, body.message, answer, intent, context, pick_name, demo_key
             )
         except Exception:
             logger.exception("Failed to store chat turn")
@@ -211,24 +275,35 @@ async def chat_stream(
     )
 
 
+def _parse_connection_id(connection_id: str | None) -> uuid.UUID | None:
+    if not connection_id:
+        return None
+    try:
+        return uuid.UUID(connection_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid connection id")
+
+
 @router.get("/history", response_model=list[ChatHistoryMessage])
 async def chat_history(
-    limit: int = 50,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
     connection_id: str | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    cid = _parse_connection_id(connection_id)
+    if is_demo(user):
+        thread = _demo_messages(_demo_key(request, user, str(cid) if cid else None))
+        return [ChatHistoryMessage(**m) for m in thread[-limit:]]
     query = select(ChatMessage).where(ChatMessage.user_id == user.id)
-    if connection_id:
-        try:
-            query = query.where(ChatMessage.connection_id == uuid.UUID(connection_id))
-        except ValueError:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid connection id")
+    if cid:
+        query = query.where(ChatMessage.connection_id == cid)
     rows = (
         (
             await db.execute(
                 query.order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc()).limit(
-                    min(limit, 200)
+                    limit
                 )
             )
         )
@@ -245,15 +320,24 @@ async def chat_history(
 
 @router.delete("/history", status_code=204)
 async def clear_history(
+    request: Request,
     connection_id: str | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    cid = _parse_connection_id(connection_id)
+    if is_demo(user):
+        # Only this visitor's own threads — never the shared account's rows.
+        prefix = _demo_key(request, user, str(cid) if cid else None)
+        if prefix is not None:
+            if cid:
+                _demo_chats.pop(prefix, None)
+            else:
+                for key in [k for k in _demo_chats if k.startswith(prefix)]:
+                    del _demo_chats[key]
+        return
     stmt = delete(ChatMessage).where(ChatMessage.user_id == user.id)
-    if connection_id:
-        try:
-            stmt = stmt.where(ChatMessage.connection_id == uuid.UUID(connection_id))
-        except ValueError:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid connection id")
+    if cid:
+        stmt = stmt.where(ChatMessage.connection_id == cid)
     await db.execute(stmt)
     await db.commit()

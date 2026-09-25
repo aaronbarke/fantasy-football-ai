@@ -80,6 +80,8 @@ async def job_refresh_injuries() -> None:
 
 async def send_injury_alerts(db, events) -> None:
     """Email each affected user when one of their rostered players goes down."""
+    from html import escape
+
     from app.models import Player, Roster, User
     from app.services.email_service import send_email
 
@@ -111,8 +113,12 @@ async def send_injury_alerts(db, events) -> None:
             replacements = [
                 p.full_name for p in bench_players if p.position == player.position
             ][:3]
+            # Names and statuses come from third-party feeds: escape them.
+            name, pos, team = (
+                escape(str(v)) for v in (player.full_name, player.position, player.team)
+            )
             repl_html = (
-                f"<p>Bench options at {player.position}: {', '.join(replacements)}</p>"
+                f"<p>Bench options at {pos}: {escape(', '.join(replacements))}</p>"
                 if replacements
                 else "<p>No bench players at this position — check the waiver wire.</p>"
             )
@@ -120,9 +126,9 @@ async def send_injury_alerts(db, events) -> None:
                 to=user.email,
                 subject=f"🚑 {player.full_name} is {event.new_status}",
                 html=(
-                    f"<h2>{player.full_name} ({player.position}, {player.team}) "
-                    f"is now <b>{event.new_status}</b></h2>"
-                    f"<p>Previous status: {event.old_status or 'Healthy'}</p>"
+                    f"<h2>{name} ({pos}, {team}) "
+                    f"is now <b>{escape(str(event.new_status))}</b></h2>"
+                    f"<p>Previous status: {escape(str(event.old_status or 'Healthy'))}</p>"
                     f"{repl_html}"
                     f"<p>Open the app and ask the AI for a full replacement plan.</p>"
                 ),

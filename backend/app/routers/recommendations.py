@@ -66,8 +66,8 @@ async def summary(
 
 @router.post("/evaluate")
 async def evaluate_now(
-    _: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
-    """Manually grade pending calls (the Wednesday job does this automatically)."""
-    graded = await evaluate_pending(db)
+    """Manually grade your pending calls (the Wednesday job grades everyone's)."""
+    graded = await evaluate_pending(db, user_id=user.id)
     return {"graded": graded}

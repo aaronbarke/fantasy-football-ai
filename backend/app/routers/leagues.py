@@ -1,5 +1,7 @@
+import logging
 import uuid
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,10 +30,33 @@ from app.schemas.league import (
 )
 from app.services.sleeper_service import SleeperClient
 from app.services.sync_service import sync_league, sync_live_scores
+from app.utils.credentials import seal_credentials
 from app.utils.fantasy_math import scoring_type_from_settings
 from app.utils.security import block_demo, get_current_user
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/leagues", tags=["leagues"])
+
+
+def _sync_failure(conn: LeagueConnection, exc: Exception) -> HTTPException:
+    """A user-facing error for a failed league sync. The exception itself is
+    logged, not returned — it can carry SQL, upstream URLs and internals."""
+    logger.warning(
+        "League sync failed for %s league %s", conn.platform, conn.league_id, exc_info=exc
+    )
+    platform = "ESPN" if conn.platform == "espn" else "Sleeper"
+    code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    if code in (401, 403):
+        detail = (
+            f"{platform} refused access to that league — for a private league, "
+            "check your espn_s2 and SWID cookies."
+        )
+    elif code == 404:
+        detail = f"{platform} couldn't find that league — check the league ID and season."
+    else:
+        detail = f"Couldn't sync the league from {platform} — try again in a moment."
+    return HTTPException(status.HTTP_502_BAD_GATEWAY, detail)
 
 
 def _conn_response(conn: LeagueConnection) -> LeagueConnectionResponse:
@@ -122,7 +147,7 @@ async def connect_league(
 
     credentials = None
     if body.platform == "espn" and body.espn_s2 and body.swid:
-        credentials = {"espn_s2": body.espn_s2, "swid": body.swid}
+        credentials = seal_credentials({"espn_s2": body.espn_s2, "swid": body.swid})
 
     conn = LeagueConnection(
         user_id=user.id,
@@ -139,10 +164,9 @@ async def connect_league(
     try:
         await sync_league(db, conn)
     except Exception as exc:
+        failure = _sync_failure(conn, exc)  # before rollback expires conn
         await db.rollback()
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Failed to sync league: {exc}"
-        ) from exc
+        raise failure from exc
 
     if conn.platform == "sleeper":
         conn.scoring_type = scoring_type_from_settings(conn.scoring_settings)
@@ -200,7 +224,12 @@ async def trigger_sync(
     db: AsyncSession = Depends(get_db),
 ):
     conn = await _get_user_connection(db, user, connection_id)
-    await sync_league(db, conn)
+    try:
+        await sync_league(db, conn)
+    except Exception as exc:
+        failure = _sync_failure(conn, exc)  # before rollback expires conn
+        await db.rollback()
+        raise failure from exc
     return _conn_response(conn)
 
 
