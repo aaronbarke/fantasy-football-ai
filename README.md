@@ -33,9 +33,11 @@ one-click **Demo login** on the sign-in page skips signup and lands on a fully s
 
 ### A look at it
 
-| Weekly Game Plan | AI chat (grounded) | Draft room |
+| Weekly Game Plan | AI chat (grounded) | Trade Finder |
 |---|---|---|
-| [![Weekly Game Plan](docs/screenshots/gameplan.png)](docs/screenshots/gameplan.png) | [![AI chat with receipts](docs/screenshots/chat.png)](docs/screenshots/chat.png) | [![Draft room](docs/screenshots/draft.png)](docs/screenshots/draft.png) |
+| [![Weekly Game Plan](docs/screenshots/gameplan.png)](docs/screenshots/gameplan.png) | [![AI chat with receipts](docs/screenshots/chat.png)](docs/screenshots/chat.png) | [![Trade Finder](docs/screenshots/trade-finder.png)](docs/screenshots/trade-finder.png) |
+| **Draft room** | **Schedule strength** | **Sportsbook lines** |
+| [![Draft room](docs/screenshots/draft.png)](docs/screenshots/draft.png) | [![Schedule strength heatmap](docs/screenshots/schedule.png)](docs/screenshots/schedule.png) | [![Sportsbook line shopping](docs/screenshots/sportsbook.png)](docs/screenshots/sportsbook.png) |
 
 ## What's in it
 
