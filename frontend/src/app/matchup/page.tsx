@@ -18,20 +18,18 @@ import InjuryBadge from "@/components/InjuryBadge";
 import { api, ApiError } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import PlayerAvatar from "@/components/PlayerAvatar";
-import { positionColor } from "@/lib/utils";
+import ProjectionMath, { type ProjectionBreakdown } from "@/components/ProjectionMath";
+import { injuryColor, positionColor } from "@/lib/utils";
 import { RefreshCw, Sparkles } from "lucide-react";
 
-interface MPlayer {
+interface MPlayer extends ProjectionBreakdown {
   id: string;
   name: string;
   position: string | null;
   team: string | null;
-  injury_status?: string | null;
-  projected: number | null;
   actual_points?: number | null;
   confidence?: string | null;
   opponent?: string | null;
-  bye?: boolean;
 }
 interface MRow {
   slot: string;
@@ -68,6 +66,18 @@ interface OddsHistory {
 
 const POLL_MS = 45_000;
 
+// Phone-width labels for injury designations, so a long status like "Injured
+// Reserve" doesn't crowd out the player's name.
+const SHORT_STATUS: Record<string, string> = {
+  "injured reserve": "IR",
+  questionable: "Q",
+  doubtful: "D",
+  out: "O",
+  suspension: "SUS",
+  "physically unable to perform": "PUP",
+  "non-football injury": "NFI",
+};
+
 function PlayerSide({
   p,
   win,
@@ -83,9 +93,9 @@ function PlayerSide({
   if (!p) {
     return (
       <div
-        className={`flex flex-1 items-center gap-2 ${right ? "flex-row-reverse text-right" : ""}`}
+        className={`flex min-w-0 flex-1 items-center gap-2 ${right ? "flex-row-reverse text-right" : ""}`}
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gray-100 text-[10px] text-gray-400 dark:bg-gray-800">
+        <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gray-100 text-[10px] text-gray-400 dark:bg-gray-800 sm:flex">
           —
         </div>
         <span className="text-sm text-gray-400">No projection</span>
@@ -94,20 +104,24 @@ function PlayerSide({
   }
   return (
     <div
-      className={`flex flex-1 items-center gap-2.5 ${right ? "flex-row-reverse text-right" : ""}`}
+      className={`flex min-w-0 flex-1 items-center gap-2.5 ${right ? "flex-row-reverse text-right" : ""}`}
     >
+      {/* Position chip + headshot are extras on a phone — the slot label sits
+          above the row — so they drop out there and both sides fit. */}
       <span
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white ${positionColor(p.position)}`}
+        className={`hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white sm:flex ${positionColor(p.position)}`}
       >
         {p.position}
       </span>
-      <PlayerAvatar
-        id={p.id}
-        name={p.name}
-        position={p.position}
-        team={p.team}
-        size={36}
-      />
+      <span className="hidden shrink-0 sm:block">
+        <PlayerAvatar
+          id={p.id}
+          name={p.name}
+          position={p.position}
+          team={p.team}
+          size={36}
+        />
+      </span>
       <div className="min-w-0 flex-1">
         <div
           className={`flex items-center gap-1.5 ${right ? "flex-row-reverse" : ""}`}
@@ -115,7 +129,19 @@ function PlayerSide({
           <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
             {p.name}
           </span>
-          <InjuryBadge status={p.injury_status} />
+          {/* On a phone, "Active" (healthy) is dropped and real designations
+              shrink to a short label, so the name keeps its room. */}
+          <span className="hidden shrink-0 sm:inline">
+            <InjuryBadge status={p.injury_status} />
+          </span>
+          {p.injury_status && p.injury_status.toLowerCase() !== "active" && (
+            <span
+              className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold sm:hidden ${injuryColor(p.injury_status)}`}
+              title={p.injury_status}
+            >
+              {SHORT_STATUS[p.injury_status.toLowerCase()] ?? p.injury_status}
+            </span>
+          )}
         </div>
         <p className="text-xs text-gray-400">
           {p.team}
@@ -211,18 +237,23 @@ function BenchColumn({
       ) : (
         <ul className="space-y-1.5">
           {players!.map((p) => (
-            <li key={p.id} className="flex items-center gap-2">
-              <span
-                className={`flex h-6 w-8 shrink-0 items-center justify-center rounded text-[9px] font-bold text-white ${positionColor(p.position)}`}
-              >
-                {p.position}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-sm text-gray-800 dark:text-gray-200">
-                {p.name}
-              </span>
-              <span className="shrink-0 text-sm font-semibold tabular-nums text-gray-400">
-                {p.projected != null ? p.projected.toFixed(1) : "—"}
-              </span>
+            <li key={p.id}>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`flex h-6 w-8 shrink-0 items-center justify-center rounded text-[9px] font-bold text-white ${positionColor(p.position)}`}
+                >
+                  {p.position}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-gray-800 dark:text-gray-200">
+                  {p.name}
+                </span>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-gray-400">
+                  {p.projected != null ? p.projected.toFixed(1) : "—"}
+                </span>
+              </div>
+              <div className="pl-10">
+                <ProjectionMath p={p} />
+              </div>
             </li>
           ))}
         </ul>
@@ -465,6 +496,14 @@ export default function MatchupPage() {
                       </div>
                       <PlayerSide p={r.opponent} win={oppWin} align="right" live={live} />
                     </div>
+                    {(r.user || r.opponent) && (
+                      <div className="mt-1 grid grid-cols-2 gap-6">
+                        <div>{r.user && <ProjectionMath p={r.user} />}</div>
+                        <div>
+                          {r.opponent && <ProjectionMath p={r.opponent} align="right" />}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
