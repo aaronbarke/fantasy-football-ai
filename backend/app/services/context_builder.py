@@ -28,6 +28,15 @@ from app.services.schedule_service import (
     latest_stats_season,
 )
 
+# Capitalized words that start questions, not player names. Only used to filter
+# single-word matches; a full name like "Will Levis" still matches as a pair.
+_NOT_NAMES = {
+    "should", "would", "could", "will", "start", "sit", "who", "what", "which",
+    "when", "where", "why", "how", "trade", "drop", "pick", "bench", "play",
+    "give", "get", "this", "that", "week", "does", "can", "is", "are", "do",
+    "flex", "waiver", "waivers", "also", "and", "but", "or",
+}
+
 INTENT_KEYWORDS = {
     "start_sit": ["start", "sit", "bench", "lineup", "flex", "who should i play"],
     "trade": ["trade", "deal", "swap", "give up", "package", "acquire"],
@@ -51,12 +60,25 @@ async def find_mentioned_players(
     """Match capitalized word pairs and known-name fragments in the question
     against the players table."""
     candidates: set[str] = set()
+    # Lowercase capitalized question words first, so "Start Addison" isn't read
+    # as a two-word name (and doesn't swallow "Addison").
+    question = re.sub(
+        r"\b[A-Z][a-z]*\b",
+        lambda m: m.group(0).lower() if m.group(0).lower() in _NOT_NAMES else m.group(0),
+        question,
+    )
     # Word pairs like "Ja'Marr Chase", "CeeDee Lamb"
+    pair_words: set[str] = set()
     for m in re.finditer(r"\b([A-Z][\w.'-]+)\s+([A-Z][\w.'-]+)\b", question):
         candidates.add(f"{m.group(1)} {m.group(2)}")
-    # Single capitalized words (last names) as fallback
+        pair_words.update((m.group(1), m.group(2)))
+    # Single capitalized words (last names) as fallback — but never a word
+    # that's already part of a full name: "Jordan Addison" must not also search
+    # "Jordan" and drag in Jordan Love. Question words aren't names either.
     for m in re.finditer(r"\b([A-Z][a-z][\w.'-]{2,})\b", question):
-        candidates.add(m.group(1))
+        word = m.group(1)
+        if word not in pair_words and word.lower() not in _NOT_NAMES:
+            candidates.add(word)
 
     if not candidates:
         return []
@@ -283,6 +305,8 @@ def _compact_projection(pkg: dict) -> dict:
     # Only surface the injury-driven reasons when they actually fired.
     if pkg.get("boost_reason"):
         out["opportunity_boost"] = pkg["boost_reason"]
+    if pkg.get("qb_reason"):
+        out["qb_change"] = pkg["qb_reason"]
     if pkg.get("defense_reason"):
         out["matchup_boost"] = pkg["defense_reason"]
     return out

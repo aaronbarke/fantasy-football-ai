@@ -18,6 +18,17 @@ narrow one. Confidence reflects sample size and volatility.
 
 Players who can't score this week — on bye, not on an NFL roster, or ruled
 out — project to exactly 0 so no lineup or live total counts them.
+
+How a skill player's number is put together:
+
+    model     = base + matchup + vegas + weather + teammates_out + qb_change
+    projected = s * sleeper + (1 - s) * model + opposing_defense_injuries
+
+where ``s`` is Sleeper's share (0.5 early in the week, ramping to 0.7 at
+kickoff). Teammate absences and a backup QB starting live inside ``model``
+because Sleeper's weekly number already reflects that news — adding them on
+top of the blend would count it twice. Every term is returned in
+``components`` so the UI can show the math.
 """
 
 import math
@@ -92,6 +103,18 @@ OPP_BOOST_ABS_CAP = 6.0
 # if several game-wreckers are out.
 DEF_INJ_PCT_CAP = 0.12
 DEF_INJ_ABS_CAP = 3.0
+
+# Backup QB starting. Our history for a team's pass-catchers was built with the
+# usual starter throwing to them, so when he's out we scale that history down
+# by how much worse the backup projects (Sleeper's weekly number for him vs the
+# starter's points per start), at half strength — the targets still go
+# somewhere — and capped. RBs feel it less. Like the teammate boost, this only
+# moves our model's share; Sleeper's number already prices the QB change in.
+QB_CHANGE_SCALE = 0.5
+QB_CHANGE_CAP = 0.15
+QB_CHANGE_DEFAULT = 0.08  # when the drop can't be sized (no backup projection)
+QB_CHANGE_POSITION_WEIGHT = {"WR": 1.0, "TE": 1.0, "RB": 0.4}
+QB_START_PASS_YARDS = 100  # a game with this many passing yards counts as a start
 
 
 def sleeper_blend_weight(now: datetime | None, kickoff: datetime | None) -> float:
@@ -220,6 +243,7 @@ def _inactive_package(reason: str, week: int | None, base_ppg: float | None = No
         "bye": reason == "bye",
         "inactive_reason": reason,
         "boost_reason": None,
+        "qb_reason": None,
         "defense_reason": None,
         "components": {
             "base_ppg": round(base_ppg, 1) if base_ppg is not None else None,
@@ -227,8 +251,11 @@ def _inactive_package(reason: str, week: int | None, base_ppg: float | None = No
             "vegas_adj": 0.0,
             "weather_adj": 0.0,
             "opportunity_adj": 0.0,
+            "qb_adj": 0.0,
+            "model_proj": None,
             "defense_injury_adj": 0.0,
             "external_proj": None,
+            "blend_weight": None,
             "opponent": None,
             "week": week,
             "home": None,
@@ -398,6 +425,10 @@ async def compute_projections(
     opponents = {g["opponent"] for g in next_opponent.values() if g.get("opponent")}
     def_out_by_opp, alignment = await _defense_injury_context(db, opponents, ids)
 
+    # Teams whose usual starting QB is out this week, and how much to discount
+    # their pass-catchers' history for it.
+    qb_change = await _qb_change_context(db, teams, latest_season, external)
+
     out: dict[str, dict] = {}
     for p in players:
         samples = per_player.get(p.id, [])
@@ -438,6 +469,7 @@ async def compute_projections(
                 "bye": False,
                 "inactive_reason": None,
                 "boost_reason": None,
+                "qb_reason": None,
                 "defense_reason": None,
                 "components": {
                     "base_ppg": round(thin_base, 1) if thin_base is not None else None,
@@ -445,8 +477,11 @@ async def compute_projections(
                     "vegas_adj": 0.0,
                     "weather_adj": 0.0,
                     "opportunity_adj": 0.0,
+                    "qb_adj": 0.0,
+                    "model_proj": None,
                     "defense_injury_adj": 0.0,
                     "external_proj": round(float(ext), 1),
+                    "blend_weight": 1.0,
                     "opponent": game["opponent"] if game else None,
                     "week": game["week"] if game else None,
                     "home": game["home"] if game else None,
@@ -484,32 +519,47 @@ async def compute_projections(
                 p.position, base, gc_by_team_week.get((p.team, game["week"]))
             )
 
-        model_proj = base + matchup_adj + vegas_adj + weather_adj
-        if ext is not None:
-            # Blend our model with Sleeper's weekly projection, leaning harder on
-            # Sleeper as kickoff nears (it reflects late-breaking news).
-            w = sleeper_blend_weight(now, game["kickoff"] if game else None)
-            projected = max(0.0, w * ext + (1 - w) * model_proj)
-        else:
-            projected = max(0.0, model_proj)
-
-        # Teammate-injury opportunity boost — purely additive, and exactly 0.0
-        # when no qualifying teammate is out, so healthy slates are unchanged.
+        # Late-news adjustments to OUR model: a teammate's absence (vacated
+        # targets) and a backup QB starting. Both are exactly 0.0 on a healthy
+        # slate. They go inside the model, not on top of the blend: Sleeper's
+        # weekly number already reflects the same news (it zeroes the injured
+        # player and re-projects his teammates), so adding them after the blend
+        # counted it twice.
         opportunity_adj = 0.0
-        boost_reason = None
         opp = opp_shares.get(p.id)
         if opp:
             raw = opp["extra_share"] * PTS_PER_TARGET_SHARE
             cap = min(OPP_BOOST_BASE_FRAC * base, OPP_BOOST_ABS_CAP)
-            opportunity_adj = round(min(raw, cap), 1)
-            if opportunity_adj > 0:
-                boost_reason = (
-                    f"{opp['reason_prefix']} — +{opportunity_adj:.1f} from vacated targets"
-                )
-            else:
-                opportunity_adj = 0.0
-        if opportunity_adj:
-            projected = max(0.0, projected + opportunity_adj)
+            opportunity_adj = max(0.0, min(raw, cap))
+
+        qb_adj = 0.0
+        qb_note = qb_change.get(p.team or "")
+        if qb_note and p.position in QB_CHANGE_POSITION_WEIGHT:
+            qb_adj = -base * qb_note["pct"] * QB_CHANGE_POSITION_WEIGHT[p.position]
+
+        model_proj = base + matchup_adj + vegas_adj + weather_adj + opportunity_adj + qb_adj
+        blend_weight = None
+        if ext is not None:
+            # Blend our model with Sleeper's weekly projection, leaning harder on
+            # Sleeper as kickoff nears (it reflects late-breaking news).
+            blend_weight = sleeper_blend_weight(now, game["kickoff"] if game else None)
+            projected = max(0.0, blend_weight * ext + (1 - blend_weight) * model_proj)
+        else:
+            projected = max(0.0, model_proj)
+
+        # Reasons quote what each adjustment actually did to the final number
+        # (its share after the blend), not the raw model term.
+        model_share = 1.0 - (blend_weight or 0.0)
+        opp_effect = round(opportunity_adj * model_share, 1)
+        qb_effect = round(qb_adj * model_share, 1)
+        boost_reason = (
+            f"{opp['reason_prefix']} — +{opp_effect:.1f} from vacated targets"
+            if opp and opp_effect > 0
+            else None
+        )
+        qb_reason = (
+            f"{qb_note['reason']} — {qb_effect:.1f}" if qb_note and qb_effect < 0 else None
+        )
 
         # Opponent defensive-injury adjustment — additive, and 0.0 when the
         # opposing defense is at full strength (so healthy slates are unchanged).
@@ -556,15 +606,22 @@ async def compute_projections(
             "bye": False,
             "inactive_reason": None,
             "boost_reason": boost_reason,
+            "qb_reason": qb_reason,
             "defense_reason": defense_reason,
             "components": {
+                # Our model's terms (they sum to model_proj)...
                 "base_ppg": round(base, 1),
                 "matchup_adj": round(matchup_adj, 1),
                 "vegas_adj": round(vegas_adj, 1),
                 "weather_adj": round(weather_adj, 1),
-                "opportunity_adj": opportunity_adj,
-                "defense_injury_adj": defense_injury_adj,
+                "opportunity_adj": round(opportunity_adj, 1),
+                "qb_adj": round(qb_adj, 1),
+                "model_proj": round(model_proj, 1),
+                # ...blended with Sleeper's number at blend_weight (Sleeper's
+                # share), then the opposing-defense injury bump on top.
                 "external_proj": round(ext, 1) if ext is not None else None,
+                "blend_weight": round(blend_weight, 2) if blend_weight is not None else None,
+                "defense_injury_adj": defense_injury_adj,
                 "opponent": opponent,
                 "week": game["week"] if game else None,
                 "home": game["home"] if game else None,
@@ -635,6 +692,104 @@ async def compute_projections(
                 "week": game["week"] if game else None,
                 "home": game["home"] if game else None,
             },
+        }
+    return out
+
+
+async def _qb_change_context(
+    db: AsyncSession,
+    teams: set[str],
+    latest_season: int | None,
+    external: dict[str, float],
+) -> dict[str, dict]:
+    """team -> {"pct", "reason"} for every team whose established starting QB is
+    out this week. ``{}`` when every starter is healthy.
+
+    The starter is the team QB with the most starts (100+ passing-yard games)
+    this season, then last season — not the depth chart, which Sleeper often
+    reshuffles once the starter is hurt. The backup is the healthy QB Sleeper
+    projects highest. The pass-catcher discount is half the backup's shortfall
+    against the starter's points per start, capped."""
+    if not teams or latest_season is None:
+        return {}
+    qbs = (
+        await db.execute(
+            select(
+                Player.id,
+                Player.full_name,
+                Player.team,
+                Player.injury_status,
+                Player.depth_chart_order,
+            ).where(Player.team.in_(teams), Player.position == "QB")
+        )
+    ).all()
+    if not qbs:
+        return {}
+
+    rows = (
+        await db.execute(
+            select(
+                PlayerStatsWeekly.player_id,
+                PlayerStatsWeekly.season,
+                PlayerStatsWeekly.pass_yards,
+                PlayerStatsWeekly.fantasy_points_ppr,
+            ).where(
+                PlayerStatsWeekly.player_id.in_([q.id for q in qbs]),
+                PlayerStatsWeekly.season >= latest_season - 1,
+                PlayerStatsWeekly.week <= REGULAR_SEASON_MAX_WEEK,
+            )
+        )
+    ).all()
+    starts: dict[str, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        if float(r.pass_yards or 0) >= QB_START_PASS_YARDS and r.fantasy_points_ppr is not None:
+            starts[r.player_id][r.season].append(float(r.fantasy_points_ppr))
+
+    by_team: dict[str, list] = defaultdict(list)
+    for q in qbs:
+        by_team[q.team].append(q)
+
+    out: dict[str, dict] = {}
+    for team, team_qbs in by_team.items():
+        def start_key(q):
+            s = starts.get(q.id, {})
+            return (
+                len(s.get(latest_season, [])),
+                len(s.get(latest_season - 1, [])),
+                -(q.depth_chart_order or 99),
+            )
+
+        starter = max(team_qbs, key=start_key)
+        record = starts.get(starter.id, {})
+        latest_starts = record.get(latest_season, [])
+        prior_starts = record.get(latest_season - 1, [])
+        if not (latest_starts or prior_starts) or not _is_absent(starter.injury_status):
+            continue
+        healthy = [
+            q for q in team_qbs if q.id != starter.id and not _is_absent(q.injury_status)
+        ]
+        if not healthy:
+            continue
+        backup = max(
+            healthy,
+            key=lambda q: (external.get(q.id) or 0.0, -(q.depth_chart_order or 99)),
+        )
+        games = latest_starts if len(latest_starts) >= 2 else latest_starts + prior_starts
+        starter_ppg = sum(games) / len(games) if games else 0.0
+        backup_proj = external.get(backup.id)
+        if starter_ppg > 0 and backup_proj is not None:
+            drop = max(0.0, 1.0 - float(backup_proj) / starter_ppg)
+            pct = min(QB_CHANGE_CAP, QB_CHANGE_SCALE * drop)
+        else:
+            pct = QB_CHANGE_DEFAULT
+        if pct <= 0:
+            continue
+        out[team] = {
+            "pct": pct,
+            "reason": (
+                f"{starter.full_name} ({starter.injury_status}) out, "
+                f"{backup.full_name} starting"
+            ),
         }
     return out
 

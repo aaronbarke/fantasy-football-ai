@@ -40,7 +40,8 @@ recommending an add, drop, or start/sit, rank the players by projected first; \
 trending_adds, recent_ppr_avg and name recognition are secondary tie-breakers, \
 never a reason to bench or drop a higher-projected player. opportunity_boost / \
 matchup_boost, when set, explain an injury-driven bump already baked into \
-projected — cite them. Never tell the user to drop a player who out-projects the \
+projected — cite them. qb_change, when set, means the team's usual starting QB \
+is out and the backup is starting; the downgrade is already in projected. Never tell the user to drop a player who out-projects the \
 one you'd add without saying plainly that you're prioritizing rest-of-season \
 upside over this week's points.
 - league_rosters (trade questions): every OTHER team in the league with its \

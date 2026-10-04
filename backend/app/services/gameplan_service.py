@@ -153,9 +153,15 @@ async def _player_cards(
                 "weather_adj": (proj.get("components") or {}).get("weather_adj"),
                 "opportunity_adj": (proj.get("components") or {}).get("opportunity_adj"),
                 "boost_reason": proj.get("boost_reason"),
+                "qb_adj": (proj.get("components") or {}).get("qb_adj"),
+                "qb_reason": proj.get("qb_reason"),
                 "defense_injury_adj": (proj.get("components") or {}).get("defense_injury_adj"),
                 "defense_reason": proj.get("defense_reason"),
                 "external_proj": (proj.get("components") or {}).get("external_proj"),
+                # The rest of the math, so the UI can show how the number was built.
+                "base_ppg": (proj.get("components") or {}).get("base_ppg"),
+                "model_proj": (proj.get("components") or {}).get("model_proj"),
+                "blend_weight": (proj.get("components") or {}).get("blend_weight"),
             }
         )
     return cards
