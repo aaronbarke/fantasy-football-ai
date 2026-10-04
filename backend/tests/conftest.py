@@ -18,3 +18,8 @@ def _no_team_results_fetch(monkeypatch):
         return []
 
     monkeypatch.setattr(projection_service, "get_team_results", _none)
+
+    async def _no_passing(season, week):
+        return {}
+
+    monkeypatch.setattr(projection_service, "get_external_passing", _no_passing)

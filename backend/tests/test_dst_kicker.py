@@ -145,7 +145,7 @@ async def test_defense_facing_a_backup_qb_with_team_history(db: AsyncSession, mo
     assert terms["Opponent offense"] < 0      # facing a high-scoring offense...
     assert terms["Defense quality"] < 0       # ...with a leaky defense...
     assert terms["Backup QB"] > 0             # ...but their starter is out
-    assert "Starter (Out) out, Backup starting" in d["qb_reason"]
+    assert "Backup starting for Starter (Out)" in d["qb_reason"]
     # Sleeper's DEF number blends in at the early-week weight.
     c = d["components"]
     assert c["blend_weight"] == 0.5

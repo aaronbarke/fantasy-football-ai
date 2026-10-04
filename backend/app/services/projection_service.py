@@ -40,11 +40,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DepthChartEntry, GameCondition, NflSchedule, Player, PlayerStatsWeekly
 from app.services.defense_impact_service import defense_injury_pct
-from app.services.external_proj_service import get_external_projections
+from app.services.external_proj_service import get_external_passing, get_external_projections
 from app.services.opportunity_service import (
     PASS_CATCHER_POSITIONS,
     _is_absent,
+    absence_freshness,
     compute_opportunity_shares,
+    compute_rush_shares,
 )
 from app.services.schedule_service import (
     current_nfl_week,
@@ -93,6 +95,10 @@ WEATHER_ADJ_CAP = 0.12
 # not absorbed 1:1 — some looks disappear with the player, some go to non-
 # receivers — so this stays conservative.
 PTS_PER_TARGET_SHARE = 45.0
+# Same idea for running backs: a team's backs get ~24 carries a game worth
+# ~0.6 points each (yards + touchdowns), so a full share of the RB carries is
+# ~14 points; vacated carries count at that rate.
+PTS_PER_CARRY_SHARE = 14.0
 # Boost cap: never more than this fraction of the player's own baseline, and
 # never more than this many absolute points. One injury shouldn't manufacture an
 # absurd projection.
@@ -579,7 +585,10 @@ async def compute_projections(
 
     # Teams whose usual starting QB is out this week, and how much to discount
     # their pass-catchers' history for it.
-    qb_change = await _qb_change_context(db, teams | opponents, latest_season, external)
+    passing = await get_external_passing(season, target_week) if target_week else {}
+    qb_change = await _qb_change_context(
+        db, teams | opponents, latest_season, external, passing
+    )
     # Team scoring form (points for/against, interceptions) — only the DEF and
     # kicker models use it, so skip the fetch for skill-player-only requests.
     team_form = (
@@ -685,9 +694,8 @@ async def compute_projections(
         opportunity_adj = 0.0
         opp = opp_shares.get(p.id)
         if opp:
-            raw = opp["extra_share"] * PTS_PER_TARGET_SHARE
             cap = min(OPP_BOOST_BASE_FRAC * base, OPP_BOOST_ABS_CAP)
-            opportunity_adj = max(0.0, min(raw, cap))
+            opportunity_adj = max(0.0, min(opp["extra_points"], cap))
 
         qb_adj = 0.0
         qb_note = qb_change.get(p.team or "")
@@ -710,7 +718,7 @@ async def compute_projections(
         opp_effect = round(opportunity_adj * model_share, 1)
         qb_effect = round(qb_adj * model_share, 1)
         boost_reason = (
-            f"{opp['reason_prefix']} — +{opp_effect:.1f} from vacated targets"
+            f"{opp['reason_prefix']} — +{opp_effect:.1f} from vacated {opp['kind']}"
             if opp and opp_effect > 0
             else None
         )
@@ -988,6 +996,7 @@ async def _qb_change_context(
     teams: set[str],
     latest_season: int | None,
     external: dict[str, float],
+    passing: dict[str, float] | None = None,
 ) -> dict[str, dict]:
     """team -> {"pct", "reason"} for every team whose established starting QB is
     out this week. ``{}`` when every starter is healthy.
@@ -995,8 +1004,12 @@ async def _qb_change_context(
     The starter is the team QB with the most starts (100+ passing-yard games)
     this season, then last season — not the depth chart, which Sleeper often
     reshuffles once the starter is hurt. The backup is the healthy QB Sleeper
-    projects highest. The pass-catcher discount is half the backup's shortfall
-    against the starter's points per start, capped."""
+    projects to throw the most. The pass-catcher discount is half the backup's
+    projected *passing* shortfall against the starter's passing points per
+    start (this season full weight, last season 0.3), capped — passing, not
+    total fantasy points, because a running QB's rushing doesn't feed his
+    receivers."""
+    passing = passing or {}
     if not teams or latest_season is None:
         return {}
     qbs = (
@@ -1019,7 +1032,8 @@ async def _qb_change_context(
                 PlayerStatsWeekly.player_id,
                 PlayerStatsWeekly.season,
                 PlayerStatsWeekly.pass_yards,
-                PlayerStatsWeekly.fantasy_points_ppr,
+                PlayerStatsWeekly.pass_tds,
+                PlayerStatsWeekly.interceptions,
             ).where(
                 PlayerStatsWeekly.player_id.in_([q.id for q in qbs]),
                 PlayerStatsWeekly.season >= latest_season - 1,
@@ -1029,8 +1043,12 @@ async def _qb_change_context(
     ).all()
     starts: dict[str, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
     for r in rows:
-        if float(r.pass_yards or 0) >= QB_START_PASS_YARDS and r.fantasy_points_ppr is not None:
-            starts[r.player_id][r.season].append(float(r.fantasy_points_ppr))
+        if float(r.pass_yards or 0) >= QB_START_PASS_YARDS:
+            starts[r.player_id][r.season].append(
+                0.04 * float(r.pass_yards or 0)
+                + 4.0 * float(r.pass_tds or 0)
+                - 2.0 * float(r.interceptions or 0)
+            )
 
     by_team: dict[str, list] = defaultdict(list)
     for q in qbs:
@@ -1059,11 +1077,19 @@ async def _qb_change_context(
             continue
         backup = max(
             healthy,
-            key=lambda q: (external.get(q.id) or 0.0, -(q.depth_chart_order or 99)),
+            key=lambda q: (
+                passing.get(q.id) or 0.0,
+                external.get(q.id) or 0.0,
+                -(q.depth_chart_order or 99),
+            ),
         )
-        games = latest_starts if len(latest_starts) >= 2 else latest_starts + prior_starts
-        starter_ppg = sum(games) / len(games) if games else 0.0
-        backup_proj = external.get(backup.id)
+        weight = len(latest_starts) + TEAM_PRIOR_SEASON_WEIGHT * len(prior_starts)
+        starter_ppg = (
+            (sum(latest_starts) + TEAM_PRIOR_SEASON_WEIGHT * sum(prior_starts)) / weight
+            if weight
+            else 0.0
+        )
+        backup_proj = passing.get(backup.id)
         if starter_ppg > 0 and backup_proj is not None:
             drop = max(0.0, 1.0 - float(backup_proj) / starter_ppg)
             pct = min(QB_CHANGE_CAP, QB_CHANGE_SCALE * drop)
@@ -1074,26 +1100,28 @@ async def _qb_change_context(
         out[team] = {
             "pct": pct,
             "reason": (
-                f"{starter.full_name} ({starter.injury_status}) out, "
-                f"{backup.full_name} starting"
+                f"{backup.full_name} starting for {starter.full_name} "
+                f"({starter.injury_status})"
             ),
         }
     return out
 
 
 async def _opportunity_shares(db: AsyncSession, teams: set[str]) -> dict[str, dict]:
-    """player_id → {"extra_share", "reason_prefix"} for every pass-catcher who
-    inherits vacated targets from an officially-absent teammate. ``{}`` when no
-    team has a qualifying absence.
+    """player_id → {"extra_points", "reason_prefix", "kind"} for every healthy player who
+    inherits work from an officially-absent teammate: vacated targets (pass-
+    catchers) and vacated carries (running backs). ``{}`` when no team has a
+    qualifying, fresh absence.
 
-    Loads the full pass-catcher pool for ``teams`` (not just the requested
-    players) plus each player's recent-season average target share, then defers
-    the redistribution to ``opportunity_service``.
+    Loads the full WR/TE/RB pool for ``teams`` (not just the requested players)
+    with each player's most-recent-season average target share and carries,
+    and how recently each absent player last played, then defers the
+    redistribution to ``opportunity_service``.
     """
     if not teams:
         return {}
 
-    catchers = (
+    players = (
         await db.execute(
             select(
                 Player.id,
@@ -1108,49 +1136,103 @@ async def _opportunity_shares(db: AsyncSession, teams: set[str]) -> dict[str, di
             )
         )
     ).all()
-    if not catchers:
+    if not players:
         return {}
 
-    # Recent-season average target share per player (most recent season that has
-    # target-share data), from the regular season only.
-    ts_rows = (
+    latest_season = (await db.execute(select(func.max(PlayerStatsWeekly.season)))).scalar()
+    latest = None
+    if latest_season is not None:
+        latest_week = (
+            await db.execute(
+                select(func.max(PlayerStatsWeekly.week)).where(
+                    PlayerStatsWeekly.season == latest_season,
+                    PlayerStatsWeekly.week <= REGULAR_SEASON_MAX_WEEK,
+                )
+            )
+        ).scalar()
+        latest = (int(latest_season), int(latest_week or 0))
+
+    rows = (
         await db.execute(
             select(
                 PlayerStatsWeekly.player_id,
                 PlayerStatsWeekly.season,
+                PlayerStatsWeekly.week,
                 PlayerStatsWeekly.target_share,
+                PlayerStatsWeekly.rush_attempts,
             ).where(
-                PlayerStatsWeekly.player_id.in_([c.id for c in catchers]),
+                PlayerStatsWeekly.player_id.in_([p.id for p in players]),
                 PlayerStatsWeekly.week <= REGULAR_SEASON_MAX_WEEK,
-                PlayerStatsWeekly.target_share.is_not(None),
             )
         )
     ).all()
-    by_player: dict[str, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
-    for r in ts_rows:
-        by_player[r.player_id][r.season].append(float(r.target_share))
-    avg_share: dict[str, float] = {}
-    for pid, by_season in by_player.items():
-        season = max(by_season)  # most recent season with data
-        vals = by_season[season]
-        avg_share[pid] = sum(vals) / len(vals) if vals else 0.0
+    shares: dict[str, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
+    carries: dict[str, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
+    last_game: dict[str, tuple[int, int]] = {}
+    for r in rows:
+        if r.target_share is not None:
+            shares[r.player_id][r.season].append(float(r.target_share))
+        carries[r.player_id][r.season].append(float(r.rush_attempts or 0))
+        key = (int(r.season), int(r.week))
+        if r.player_id not in last_game or key > last_game[r.player_id]:
+            last_game[r.player_id] = key
 
-    by_team: dict[str, list[dict]] = defaultdict(list)
-    for c in catchers:
-        by_team[c.team].append(
+    def recent_avg(by_season: dict[int, list[float]]) -> float:
+        if not by_season:
+            return 0.0
+        vals = by_season[max(by_season)]  # most recent season with data
+        return sum(vals) / len(vals) if vals else 0.0
+
+    by_team: dict[str, list] = defaultdict(list)
+    for p in players:
+        by_team[p.team].append(p)
+
+    target_out: dict[str, dict] = {}
+    rush_out: dict[str, dict] = {}
+    for team_players in by_team.values():
+        def fresh(pid: str) -> float:
+            return absence_freshness(last_game.get(pid), latest)
+
+        target_out.update(compute_opportunity_shares([
             {
-                "id": c.id,
-                "name": c.full_name,
-                "position": c.position,
-                "target_share": avg_share.get(c.id, 0.0),
-                "depth_chart_order": c.depth_chart_order,
-                "injury_status": c.injury_status,
+                "id": p.id,
+                "name": p.full_name,
+                "position": p.position,
+                "target_share": recent_avg(shares.get(p.id, {})),
+                "depth_chart_order": p.depth_chart_order,
+                "injury_status": p.injury_status,
+                "freshness": fresh(p.id),
             }
-        )
+            for p in team_players
+        ]))
+
+        rbs = [p for p in team_players if p.position == "RB"]
+        rb_carries = {p.id: recent_avg(carries.get(p.id, {})) for p in rbs}
+        team_carries = sum(rb_carries.values())
+        if team_carries > 0:
+            rush_out.update(compute_rush_shares([
+                {
+                    "id": p.id,
+                    "name": p.full_name,
+                    "rush_share": rb_carries[p.id] / team_carries,
+                    "depth_chart_order": p.depth_chart_order,
+                    "injury_status": p.injury_status,
+                    "freshness": fresh(p.id),
+                }
+                for p in rbs
+            ]))
 
     out: dict[str, dict] = {}
-    for team_catchers in by_team.values():
-        out.update(compute_opportunity_shares(team_catchers))
+    for pid in set(target_out) | set(rush_out):
+        t, r = target_out.get(pid), rush_out.get(pid)
+        points = (t["extra_share"] * PTS_PER_TARGET_SHARE if t else 0.0) + (
+            r["extra_share"] * PTS_PER_CARRY_SHARE if r else 0.0
+        )
+        names = ", ".join(dict.fromkeys(
+            n for n in ((t or {}).get("reason_prefix"), (r or {}).get("reason_prefix")) if n
+        ))
+        kind = "targets and carries" if t and r else "targets" if t else "carries"
+        out[pid] = {"extra_points": points, "reason_prefix": names, "kind": kind}
     return out
 
 

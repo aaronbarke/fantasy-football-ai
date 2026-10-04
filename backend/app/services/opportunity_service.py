@@ -23,9 +23,19 @@ Design decisions:
   both already in our DB, are the accepted quantitative proxies and are what
   this model uses.
 
+- **Carries too.** A running back's absence vacates his share of the team's RB
+  carries, which flows to the healthy backs (by their own carry share, with the
+  same depth-chart tilt) — the committee back behind an injured starter is the
+  classic case.
+- **Fresh absences only.** A player who has already missed the last few games
+  is baked into his teammates' recent numbers, so his vacated share fades out
+  (``freshness``): full if he played in one of the last two weeks of data, half
+  if within four, nothing after that. Otherwise a season-long IR stint would
+  boost the same teammates every single week.
+
 The point conversion and the boost cap live in ``projection_service`` (they need
-a player's baseline points-per-game); this module stays purely about target
-share so it can be unit-tested without touching the projection math.
+a player's baseline points-per-game); this module stays purely about shares so
+it can be unit-tested without touching the projection math.
 """
 
 # An absent player must command at least this much recent target share before
@@ -39,6 +49,13 @@ RB_PASS_CATCH_MIN = 0.06
 # How much a player's depth-chart slot tilts redistribution relative to his raw
 # target share. Small on purpose: target share leads, depth chart breaks ties.
 DEPTH_WEIGHT = 0.05
+
+# An absent RB must have had at least this share of his team's RB carries to
+# vacate any — a third-stringer going out shouldn't move the starter.
+MIN_MEANINGFUL_RUSH_SHARE = 0.20
+# Depth tilt for carries: bigger than for targets, because the next man up on
+# the depth chart really does inherit the work even with little history.
+RUSH_DEPTH_WEIGHT = 0.10
 
 PASS_CATCHER_POSITIONS = {"WR", "TE", "RB"}
 # Sleeper and ESPN spell these differently ("IR" vs "Injured Reserve", "Sus" vs
@@ -87,6 +104,70 @@ def _redistribution_weight(target_share: float, depth_chart_order: int | None) -
     return share + DEPTH_WEIGHT * depth_score
 
 
+def absence_freshness(
+    last_game: tuple[int, int] | None, latest: tuple[int, int] | None
+) -> float:
+    """How much of an absent player's share is still "vacated" news.
+
+    ``last_game`` is his most recent (season, week) with stats; ``latest`` is
+    the most recent (season, week) of anyone's stats. 1.0 if he played in one
+    of the last two weeks of data (a bye in between is fine), 0.5 within four,
+    0.0 beyond — by then his teammates' recent games already show the extra
+    work. No data to judge → 1.0."""
+    if latest is None or last_game is None:
+        return 1.0
+    season, week = latest
+    last_season, last_week = last_game
+    if last_season == season:
+        missed = week - last_week
+    elif last_season == season - 1:
+        missed = week + 1  # sat out every game so far this season
+    else:
+        return 0.0
+    if missed <= 1:
+        return 1.0
+    if missed <= 3:
+        return 0.5
+    return 0.0
+
+
+def compute_rush_shares(rbs: list[dict]) -> dict[str, dict]:
+    """Split each team's vacated RB carries among its healthy backs.
+
+    ``rbs`` is one team's running backs, each a dict with ``id``, ``name``,
+    ``rush_share`` (share of the team's RB carries), ``depth_chart_order``,
+    ``injury_status`` and optional ``freshness`` (see ``absence_freshness``).
+    Returns ``player_id -> {"extra_share", "reason_prefix"}``; ``{}`` when no
+    qualifying back is out."""
+    absent = [
+        r for r in rbs
+        if _is_absent(r.get("injury_status"))
+        and (r.get("rush_share") or 0.0) >= MIN_MEANINGFUL_RUSH_SHARE
+        and r.get("freshness", 1.0) > 0
+    ]
+    vacated = sum((r.get("rush_share") or 0.0) * r.get("freshness", 1.0) for r in absent)
+    if vacated <= 0:
+        return {}
+    available = [r for r in rbs if not _is_absent(r.get("injury_status"))]
+    weights = {}
+    for r in available:
+        depth = r.get("depth_chart_order")
+        depth_score = 1.0 / depth if depth and depth > 0 else 0.15
+        weights[r["id"]] = (r.get("rush_share") or 0.0) + RUSH_DEPTH_WEIGHT * depth_score
+    wsum = sum(weights.values())
+    if wsum <= 0:
+        return {}
+    prefix = ", ".join(
+        f"{r['name']} ({r['injury_status']})"
+        for r in sorted(absent, key=lambda r: -(r.get("rush_share") or 0.0))
+    )
+    return {
+        r["id"]: {"extra_share": vacated * weights[r["id"]] / wsum, "reason_prefix": prefix}
+        for r in available
+        if weights[r["id"]] > 0
+    }
+
+
 def compute_opportunity_shares(catchers: list[dict]) -> dict[str, dict]:
     """Split each team's vacated target share among its healthy pass-catchers.
 
@@ -111,8 +192,9 @@ def compute_opportunity_shares(catchers: list[dict]) -> dict[str, dict]:
         for c in pool
         if _is_absent(c.get("injury_status"))
         and (c.get("target_share") or 0.0) >= MIN_MEANINGFUL_SHARE
+        and c.get("freshness", 1.0) > 0
     ]
-    vacated = sum((c.get("target_share") or 0.0) for c in absent)
+    vacated = sum((c.get("target_share") or 0.0) * c.get("freshness", 1.0) for c in absent)
     if vacated <= 0:
         return {}
 

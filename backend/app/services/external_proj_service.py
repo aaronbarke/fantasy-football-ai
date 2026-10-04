@@ -57,3 +57,40 @@ async def get_external_projections(
     if out:
         await cache_set(key, out, CACHE_TTL)
     return out
+
+
+async def get_external_passing(season: int, week: int) -> dict[str, float]:
+    """player_id -> Sleeper's projected *passing* points for each QB this week
+    (0.04/yd, 4/TD, -2/INT — no rushing). What a QB is expected to throw is what
+    his receivers live on; a running QB can match a passer's fantasy total
+    while giving his pass-catchers far less. {} if unavailable."""
+    key = f"sleeperpass:v1:{season}:{week}"
+    cached = await cache_get(key)
+    if cached is not None:
+        return cached
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                PROJ_URL.format(season=season, week=week),
+                params={"season_type": "regular", "position[]": ["QB"]},
+            )
+            resp.raise_for_status()
+            rows = resp.json()
+    except (httpx.HTTPError, ValueError):
+        logger.warning("Sleeper QB projections unavailable for %s wk%s", season, week)
+        return {}
+
+    out: dict[str, float] = {}
+    for row in rows:
+        pid = str(row.get("player_id") or "")
+        st = row.get("stats") or {}
+        if not pid or st.get("pass_yd") is None:
+            continue
+        out[pid] = (
+            0.04 * float(st.get("pass_yd") or 0)
+            + 4.0 * float(st.get("pass_td") or 0)
+            - 2.0 * float(st.get("pass_int") or 0)
+        )
+    if out:
+        await cache_set(key, out, CACHE_TTL)
+    return out
