@@ -47,7 +47,7 @@ export function useLeague({ requireLeague = true }: { requireLeague?: boolean } 
       setSelectedLeague(leagues[0].id);
       setSelectedId(leagues[0].id);
     }
-  }, [leagues, isFetching, selectedId, router]);
+  }, [leagues, isFetching, selectedId, router, requireLeague]);
 
   const league =
     (selectedId ? leagues?.find((l) => l.id === selectedId) : undefined) ??

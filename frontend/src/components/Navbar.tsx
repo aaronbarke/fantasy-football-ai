@@ -119,10 +119,12 @@ export default function Navbar() {
       }
     };
     document.addEventListener("keydown", onKey);
+    // Capture the button now: by cleanup time the ref may point elsewhere.
+    const menuButton = menuButtonRef.current;
     return () => {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", onKey);
-      menuButtonRef.current?.focus();
+      menuButton?.focus();
     };
   }, [mobileOpen]);
 
