@@ -26,14 +26,16 @@ async def get_external_projections(
     """player_id -> projected points (in the league's scoring format) for the
     given week. {} if unavailable."""
     field = POINTS_FIELD.get(scoring, "pts_ppr")
-    key = f"sleeperproj:{season}:{week}:{field}"
+    key = f"sleeperproj:v2:{season}:{week}:{field}"
     cached = await cache_get(key)
     if cached is not None:
         return cached
 
     params = {
         "season_type": "regular",
-        "position[]": ["QB", "RB", "WR", "TE"],
+        # Kickers and team defenses too — their ids are ours as well (DEF ids
+        # are team codes), and both blend into our K/DEF models.
+        "position[]": ["QB", "RB", "WR", "TE", "K", "DEF"],
     }
     try:
         async with httpx.AsyncClient(timeout=20) as client:

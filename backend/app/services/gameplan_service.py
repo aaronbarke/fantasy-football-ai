@@ -160,6 +160,8 @@ async def _player_cards(
                 "external_proj": (proj.get("components") or {}).get("external_proj"),
                 # The rest of the math, so the UI can show how the number was built.
                 "base_ppg": (proj.get("components") or {}).get("base_ppg"),
+                "base_label": (proj.get("components") or {}).get("base_label"),
+                "terms": (proj.get("components") or {}).get("terms"),
                 "model_proj": (proj.get("components") or {}).get("model_proj"),
                 "blend_weight": (proj.get("components") or {}).get("blend_weight"),
             }

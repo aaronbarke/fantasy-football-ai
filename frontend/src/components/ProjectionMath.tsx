@@ -7,8 +7,18 @@
  *   projected = s * Sleeper + (1 - s) * model + opposing D injuries
  */
 
+export interface ProjectionTerm {
+  label: string;
+  value: number;
+}
+
 export interface ProjectionBreakdown {
   projected: number | null;
+  // Each factor in our model and what it adds (skill players: matchup, Vegas,
+  // weather, teammates out, QB change; defenses: opponent offense, defense
+  // quality, backup QB, Vegas, weather; kickers: team scoring, dome/weather).
+  terms?: ProjectionTerm[] | null;
+  base_label?: string | null;
   injury_status?: string | null;
   bye?: boolean;
   base_ppg?: number | null;
@@ -65,13 +75,15 @@ export default function ProjectionMath({
   );
   if (!hasModel && !hasSleeper && notes.length === 0) return null;
 
-  const terms: [string, number | null | undefined][] = [
-    ["Matchup", p.matchup_adj],
-    ["Vegas team total", p.vegas_adj],
-    ["Weather", p.weather_adj],
-    ["Teammates out", p.opportunity_adj],
-    ["QB change", p.qb_adj],
-  ];
+  const terms: [string, number | null | undefined][] = p.terms
+    ? p.terms.map((t) => [t.label, t.value])
+    : [
+        ["Matchup", p.matchup_adj],
+        ["Vegas team total", p.vegas_adj],
+        ["Weather", p.weather_adj],
+        ["Teammates out", p.opportunity_adj],
+        ["QB change", p.qb_adj],
+      ];
   const s = p.blend_weight ?? (hasModel ? 0 : 1);
   const defense = p.defense_injury_adj ?? 0;
 
@@ -88,7 +100,7 @@ export default function ProjectionMath({
               <span>{p.model_proj!.toFixed(1)}</span>
             </div>
             <div className="flex justify-between pl-3">
-              <span>Recent-weighted average</span>
+              <span>{p.base_label ?? "Recent-weighted average"}</span>
               <span>{p.base_ppg!.toFixed(1)}</span>
             </div>
             {terms

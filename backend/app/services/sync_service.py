@@ -1,9 +1,10 @@
 """League data synchronization — pulls platform state into our DB."""
 
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -17,6 +18,8 @@ from app.models import (
     Roster,
 )
 from app.services.espn_service import (
+    POSITION_MAP,
+    PRO_TEAM_MAP,
     ESPNClient,
     espn_defense_code,
     roster_positions_from_espn,
@@ -26,7 +29,7 @@ from app.services.schedule_service import ensure_schedule
 from app.services.sleeper_service import SleeperClient
 from app.utils.constants import FANTASY_POSITIONS
 from app.utils.fantasy_math import scoring_type_from_settings
-from app.utils.player_id_map import espn_to_sleeper_map
+from app.utils.player_id_map import espn_to_sleeper_map, normalize_name
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +243,65 @@ async def sync_sleeper_league(db: AsyncSession, conn: LeagueConnection) -> None:
     logger.info("Synced sleeper league %s (week %d)", conn.league_id, week)
 
 
+async def resolve_espn_ids(
+    db: AsyncSession, players: list[tuple[str, dict]], espn_map: dict[str, str]
+) -> dict[str, str]:
+    """Extend ``espn_map`` with ESPN players the ID crosswalk is missing.
+
+    ``players`` is ``(espn_id, espn player object)`` pairs. A player we don't
+    know by ESPN id is matched by name + position (team breaks ties), and the
+    ESPN id is saved on his row so the match sticks. Without this, anyone
+    missing from the crosswalk — a kicker, a recent call-up — silently
+    vanished from his fantasy roster, leaving an empty lineup slot and a
+    projected total short by his points."""
+    missing = [
+        (eid, pl) for eid, pl in players
+        if eid and eid not in espn_map and pl and pl.get("fullName")
+    ]
+    if not missing:
+        return espn_map
+    names = {pl["fullName"].lower() for _, pl in missing}
+    lasts = {(pl.get("lastName") or "").lower() for _, pl in missing if pl.get("lastName")}
+    candidates = (
+        await db.execute(
+            select(Player).where(
+                or_(
+                    func.lower(Player.full_name).in_(names),
+                    func.lower(Player.last_name).in_(lasts),
+                )
+            )
+        )
+    ).scalars().all()
+    by_key: dict[tuple[str, str], list[Player]] = defaultdict(list)
+    for c in candidates:
+        by_key[(normalize_name(c.full_name), c.position or "")].append(c)
+
+    for eid, pl in missing:
+        position = POSITION_MAP.get(pl.get("defaultPositionId"))
+        if not position or position == "DEF":
+            continue  # team defenses resolve by pro team, not by name
+        matches = by_key.get((normalize_name(pl["fullName"]), position), [])
+        if len(matches) > 1:
+            team = PRO_TEAM_MAP.get(pl.get("proTeamId"))
+            matches = [m for m in matches if m.team == team] or matches
+        if len(matches) != 1:
+            continue  # unknown or ambiguous — better unmatched than wrong
+        match = matches[0]
+        espn_map[eid] = match.id
+        if not match.espn_id:
+            match.espn_id = eid
+        logger.info("Matched ESPN player %s (%s) by name", pl["fullName"], eid)
+    return espn_map
+
+
+def _roster_players(team: dict) -> list[tuple[str, dict]]:
+    """(espn id, player object) for every entry on an ESPN team roster."""
+    return [
+        (str(e.get("playerId")), (e.get("playerPoolEntry") or {}).get("player") or {})
+        for e in (team.get("roster") or {}).get("entries", [])
+    ]
+
+
 async def _replace_live_scores(
     db: AsyncSession, conn: LeagueConnection, week: int, points_by_player: dict[str, float]
 ) -> None:
@@ -303,6 +365,17 @@ async def sync_live_scores(db: AsyncSession, conn: LeagueConnection) -> None:
         finally:
             await client.close()
         espn_map = await espn_to_sleeper_map(db)
+        live_players = [
+            (str(e.get("playerId")), (e.get("playerPoolEntry") or {}).get("player") or {})
+            for entry in (schedule_data or {}).get("schedule") or []
+            for side in (entry.get("away") or {}, entry.get("home") or {})
+            for e in (
+                side.get("rosterForCurrentScoringPeriod")
+                or side.get("rosterForMatchupPeriod")
+                or {}
+            ).get("entries") or []
+        ]
+        espn_map = await resolve_espn_ids(db, live_players, espn_map)
         current = (schedule_data or {}).get("scoringPeriodId")
         await db.execute(delete(Matchup).where(Matchup.connection_id == conn.id))
         player_points = {}
@@ -406,6 +479,12 @@ async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
     if roster_positions:
         conn.roster_positions = roster_positions
     espn_map = await espn_to_sleeper_map(db)
+    seen = [pair for team in data.get("teams", []) for pair in _roster_players(team)]
+    seen += [
+        (str(e.get("id") or (e.get("player") or {}).get("id") or ""), e.get("player") or {})
+        for e in (free_agents_data or {}).get("players", [])
+    ]
+    espn_map = await resolve_espn_ids(db, seen, espn_map)
 
     # Identify the user's team from their SWID cookie (ESPN owner GUIDs are SWIDs)
     swid = (creds.get("swid") or "").strip().upper()

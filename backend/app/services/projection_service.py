@@ -51,6 +51,8 @@ from app.services.schedule_service import (
     defense_vs_position_ranks,
     points_column,
 )
+from app.services.team_stats_service import get_team_results
+from app.utils.constants import STADIUMS
 
 PRIOR_SEASON_WEIGHT = 0.5
 RECENT_WINDOW = 4
@@ -152,43 +154,193 @@ def sleeper_blend_weight(now: datetime | None, kickoff: datetime | None) -> floa
     return max(lo, min(hi, by_dow.get(ref.weekday(), lo)))
 
 
-# --- Team defense (DST) streaming model -------------------------------------
-# We don't carry DST box-score history, and projecting sacks/turnovers/TDs
-# individually is noise. The single best predictor of a defense's fantasy week
-# is how little its opponent's offense is expected to do — a bad offense means
-# more sacks, more turnovers, and a favorable points-allowed tier. So we drive
-# the DST projection off the opponent's Vegas implied total: a defense facing a
-# team implied for far fewer points than average is a great streamer, even if
-# the defense itself isn't elite.
-DST_BASELINE = 7.0  # league-average DST fantasy week (PPR-neutral)
-DST_IMPLIED_SLOPE = 0.5  # pts gained per point the opponent is implied below avg
+# --- Team defense (DST) and kicker models ------------------------------------
+# A DST week is points allowed (scored in tiers) + sacks + takeaways + the odd
+# return touchdown. Each is estimated from who's on the field:
+#
+# - Expected points allowed: the opponent offense's scoring and this defense's
+#   points allowed per game (each vs league average, shrunk toward it on thin
+#   samples), cut when the opponent's usual starting QB is out, and blended
+#   with the Vegas implied total when there's a line.
+# - Takeaways: interceptions this defense forces and the opponent offense
+#   throws per game (shrunk), plus league-average fumble recoveries. A backup
+#   QB throws more picks and takes more sacks.
+#
+# Every factor is reported as its own term — the change it makes against a
+# league-average matchup — so the breakdown reads: league-average defense +
+# opponent offense + defense quality + backup QB + Vegas + weather.
+DST_BASELINE = 7.0  # league-average DST fantasy week
 DST_MIN, DST_MAX = 2.0, 15.0
 DST_STDEV_FRAC = 0.6  # DST scoring is boom/bust — a wide band
+# Points-allowed tiers (Sleeper's defaults): (low, high, fantasy points)
+DST_PA_TIERS = (
+    (0, 0, 10.0), (1, 6, 7.0), (7, 13, 4.0), (14, 20, 1.0),
+    (21, 27, 0.0), (28, 34, -1.0), (35, 999, -4.0),
+)
+DST_PA_SD = 9.5  # spread of actual points allowed around the expectation
+AVG_SACKS = 2.4
+AVG_INTS = 0.8
+AVG_FUM_REC = 0.6
+DST_TD_PER_TAKEAWAY = 0.1  # roughly one takeaway in ten goes back for six
+# Team rates are blended with this many games of league average, and last
+# season's games count this much against this season's.
+TEAM_SHRINK_GAMES = 3.0
+TEAM_PRIOR_SEASON_WEIGHT = 0.3
+# Vegas' share of expected points when we also have the teams' history.
+VEGAS_TEAM_WEIGHT = 0.6
+# A backup QB starting against this defense: at the full QB-change discount,
+# this many more interceptions and sacks (scaled down for smaller drops).
+BACKUP_QB_INT_BOOST = 0.30
+BACKUP_QB_SACK_BOOST = 0.15
+# Kickers ride their team's expected scoring — ~0.12 fantasy points per point
+# the team is expected to score above average. Domes help; wind and rain hurt.
+K_POINTS_PER_TEAM_POINT = 0.12
+K_DOME_BONUS = 0.3
+K_WIND_PENALTY = 0.8
+K_RAIN_PENALTY = 0.3
+K_MIN = 2.0
+
+
+def _pa_tier_points(pa: int) -> float:
+    for lo, hi, pts in DST_PA_TIERS:
+        if lo <= pa <= hi:
+            return pts
+    return DST_PA_TIERS[-1][2]
+
+
+def _expected_pa_points(xpa: float) -> float:
+    """Expected points-allowed tier score when actual points allowed scatter
+    normally around ``xpa`` — smooth, unlike the step-shaped tiers."""
+    total = norm = 0.0
+    for pa in range(0, 71):
+        w = math.exp(-0.5 * ((pa - max(0.0, xpa)) / DST_PA_SD) ** 2)
+        total += w * _pa_tier_points(pa)
+        norm += w
+    return total / norm
+
+
+def _dst_points(xpa: float, ints: float, sacks: float) -> float:
+    takeaways = max(0.0, ints) + AVG_FUM_REC
+    return (
+        _expected_pa_points(xpa)
+        + sacks
+        + 2.0 * takeaways
+        + 6.0 * DST_TD_PER_TAKEAWAY * takeaways
+    )
+
+
+def _sloppy(gc: GameCondition | None) -> bool:
+    """High wind or likely rain at an outdoor stadium."""
+    if gc is None or getattr(gc, "dome", False):
+        return False
+    return float(gc.wind_mph or 0) > 15 or float(gc.precipitation_pct or 0) >= 50
+
+
+def dst_model(
+    opp_off_ppg: float | None,
+    def_pa_pg: float | None,
+    opp_ints_pg: float | None,
+    def_ints_pg: float | None,
+    opp_qb_drop: float,
+    opp_implied: float | None,
+    gc: GameCondition | None,
+) -> dict:
+    """Our DST projection, decomposed. ``opp_qb_drop`` is the opponent's
+    QB-change discount (0 when their starter plays).
+
+    Returns ``{model, terms: [(label, pts)], xpa, label}`` where model =
+    DST_BASELINE + sum(terms), each term the change from adding that factor to
+    a league-average matchup."""
+    avg = LEAGUE_AVG_TEAM_TOTAL
+    has_history = opp_off_ppg is not None or def_pa_pg is not None
+    qb_scale = opp_qb_drop / QB_CHANGE_CAP if QB_CHANGE_CAP else 0.0
+
+    def evaluate(off, pa, oi, di, qb, vegas, weather) -> tuple[float, float]:
+        off_v = avg if off is None else off
+        pa_v = avg if pa is None else pa
+        xpa = avg + (off_v - avg) + (pa_v - avg) - off_v * qb
+        if vegas and opp_implied is not None:
+            w = VEGAS_TEAM_WEIGHT if has_history else 1.0
+            xpa = w * opp_implied + (1 - w) * xpa
+        oi_v = AVG_INTS if oi is None else oi
+        di_v = AVG_INTS if di is None else di
+        ints = max(0.1, AVG_INTS + (oi_v - AVG_INTS) + (di_v - AVG_INTS))
+        scale = qb_scale if qb else 0.0
+        ints *= 1 + BACKUP_QB_INT_BOOST * scale
+        sacks = AVG_SACKS * (1 + BACKUP_QB_SACK_BOOST * scale)
+        return _dst_points(xpa, ints, sacks) + (1.0 if weather else 0.0), xpa
+
+    weather = _sloppy(gc)
+    steps = [
+        ("Opponent offense", (opp_off_ppg, None, opp_ints_pg, None, 0.0, False, False)),
+        ("Defense quality", (opp_off_ppg, def_pa_pg, opp_ints_pg, def_ints_pg, 0.0, False, False)),
+        ("Backup QB", (opp_off_ppg, def_pa_pg, opp_ints_pg, def_ints_pg, opp_qb_drop, False, False)),
+        ("Vegas line", (opp_off_ppg, def_pa_pg, opp_ints_pg, def_ints_pg, opp_qb_drop, True, False)),
+        ("Weather", (opp_off_ppg, def_pa_pg, opp_ints_pg, def_ints_pg, opp_qb_drop, True, weather)),
+    ]
+    prev, xpa = evaluate(None, None, None, None, 0.0, False, False)
+    start = prev
+    terms: list[tuple[str, float]] = []
+    for label, args in steps:
+        pts, xpa = evaluate(*args)
+        terms.append((label, pts - prev))
+        prev = pts
+    model = max(DST_MIN, min(DST_MAX, DST_BASELINE + (prev - start)))
+
+    if not has_history and opp_implied is None:
+        label = "unknown"
+    elif xpa <= avg - 4:
+        label = "great"
+    elif xpa >= avg + 4:
+        label = "tough"
+    else:
+        label = "neutral"
+    return {"model": model, "terms": terms, "xpa": xpa, "label": label}
 
 
 def _dst_projection(
     opp_implied: float | None, gc: GameCondition | None
 ) -> tuple[float, float, str]:
-    """(projected points, weather bump, matchup label) for a team defense."""
-    base = DST_BASELINE
-    if opp_implied is not None:
-        base = DST_BASELINE + DST_IMPLIED_SLOPE * (LEAGUE_AVG_TEAM_TOTAL - opp_implied)
-    weather_adj = 0.0
-    if gc is not None and not getattr(gc, "dome", False):
-        wind = float(gc.wind_mph or 0)
-        precip = float(gc.precipitation_pct or 0)
-        if wind > 15 or precip >= 50:
-            weather_adj = 1.0  # sloppy conditions → more turnovers, lower scoring
-    proj = max(DST_MIN, min(DST_MAX, base + weather_adj))
-    if opp_implied is None:
-        label = "unknown"
-    elif opp_implied <= LEAGUE_AVG_TEAM_TOTAL - 4:
-        label = "great"
-    elif opp_implied >= LEAGUE_AVG_TEAM_TOTAL + 4:
-        label = "tough"
-    else:
-        label = "neutral"
-    return proj, weather_adj, label
+    """(projected points, weather bump, matchup label) from the Vegas line
+    alone — the DST model with no team history."""
+    r = dst_model(None, None, None, None, 0.0, opp_implied, gc)
+    weather = next(v for k, v in r["terms"] if k == "Weather")
+    return r["model"], weather, r["label"]
+
+
+def kicker_model(
+    team_off_ppg: float | None,
+    opp_def_pa_pg: float | None,
+    own_qb_drop: float,
+    team_implied: float | None,
+    dome: bool,
+    gc: GameCondition | None,
+) -> dict:
+    """Our kicker projection: league-average kicker + expected team scoring +
+    dome/weather. Returns ``{model, terms, xpf}``."""
+    avg = LEAGUE_AVG_TEAM_TOTAL
+    xpf = None
+    if team_off_ppg is not None or opp_def_pa_pg is not None:
+        off_v = avg if team_off_ppg is None else team_off_ppg
+        pa_v = avg if opp_def_pa_pg is None else opp_def_pa_pg
+        xpf = avg + (off_v - avg) + (pa_v - avg) - off_v * own_qb_drop
+    if team_implied is not None:
+        xpf = (
+            VEGAS_TEAM_WEIGHT * team_implied + (1 - VEGAS_TEAM_WEIGHT) * xpf
+            if xpf is not None
+            else team_implied
+        )
+    scoring = K_POINTS_PER_TEAM_POINT * (xpf - avg) if xpf is not None else 0.0
+    venue = 0.0
+    if dome:
+        venue = K_DOME_BONUS
+    elif gc is not None:
+        if float(gc.wind_mph or 0) > 15:
+            venue -= K_WIND_PENALTY
+        if float(gc.precipitation_pct or 0) >= 50:
+            venue -= K_RAIN_PENALTY
+    terms = [("Expected team scoring", scoring), ("Dome / weather", venue)]
+    return {"model": max(K_MIN, K_BASELINE + scoring + venue), "terms": terms, "xpf": xpf}
 
 
 def _weather_adjust(position: str | None, base: float, gc: GameCondition | None) -> float:
@@ -427,7 +579,12 @@ async def compute_projections(
 
     # Teams whose usual starting QB is out this week, and how much to discount
     # their pass-catchers' history for it.
-    qb_change = await _qb_change_context(db, teams, latest_season, external)
+    qb_change = await _qb_change_context(db, teams | opponents, latest_season, external)
+    # Team scoring form (points for/against, interceptions) — only the DEF and
+    # kicker models use it, so skip the fetch for skill-player-only requests.
+    team_form = (
+        await _team_form(db, season) if (dst_players or kickers) else {}
+    )
 
     out: dict[str, dict] = {}
     for p in players:
@@ -610,6 +767,17 @@ async def compute_projections(
             "defense_reason": defense_reason,
             "components": {
                 # Our model's terms (they sum to model_proj)...
+                "base_label": "Recent-weighted average",
+                "terms": [
+                    {"label": label, "value": round(value, 1)}
+                    for label, value in (
+                        ("Matchup", matchup_adj),
+                        ("Vegas team total", vegas_adj),
+                        ("Weather", weather_adj),
+                        ("Teammates out", opportunity_adj),
+                        ("QB change", qb_adj),
+                    )
+                ],
                 "base_ppg": round(base, 1),
                 "matchup_adj": round(matchup_adj, 1),
                 "vegas_adj": round(vegas_adj, 1),
@@ -628,7 +796,18 @@ async def compute_projections(
             },
         }
 
-    # Team defenses: matchup-driven projection off the opponent's implied total.
+    def _blend(model: float, ext: float | None, game: dict | None) -> tuple[float, float | None]:
+        """Sleeper's DEF/K number blended in exactly as for skill players."""
+        if ext is None:
+            return model, None
+        w = sleeper_blend_weight(now, game["kickoff"] if game else None)
+        return max(0.0, w * ext + (1 - w) * model), w
+
+    def _terms(pairs: list[tuple[str, float]]) -> list[dict]:
+        return [{"label": k, "value": round(v, 1)} for k, v in pairs]
+
+    # Team defenses: opponent offense + this defense + the opponent's QB
+    # situation + Vegas + weather, blended with Sleeper's DEF projection.
     for p in dst_players:
         reason = _unavailable(p)
         if reason:
@@ -638,7 +817,20 @@ async def compute_projections(
         opponent = game["opponent"] if game else None
         opp_implied = implied.get((opponent, game["week"])) if opponent else None
         gc = gc_by_team_week.get((p.team, game["week"])) if game else None
-        proj, dst_weather, matchup_label = _dst_projection(opp_implied, gc)
+        opp_form = team_form.get(opponent or "") or {}
+        own_form = team_form.get(p.team or "") or {}
+        opp_qb = qb_change.get(opponent or "") or {}
+        r = dst_model(
+            opp_form.get("off_ppg"),
+            own_form.get("def_pa_pg"),
+            opp_form.get("off_ints_pg"),
+            own_form.get("def_ints_pg"),
+            opp_qb.get("pct", 0.0),
+            opp_implied,
+            gc,
+        )
+        ext = external.get(p.id)
+        proj, w = _blend(r["model"], ext, game)
         sigma = proj * DST_STDEV_FRAC
         out[p.id] = {
             "projected": round(proj, 1),
@@ -649,35 +841,59 @@ async def compute_projections(
             "bye": False,
             "inactive_reason": None,
             "boost_reason": None,
+            "qb_reason": (
+                f"Facing a backup: {opp_qb['reason']}" if opp_qb.get("reason") else None
+            ),
             "defense_reason": (
-                f"{matchup_label} matchup vs {opponent} (implied {opp_implied:.0f})"
-                if opp_implied is not None and opponent
+                f"{r['label']} matchup vs {opponent} — expects ~{r['xpa']:.0f} points allowed"
+                if opponent and r["label"] != "unknown"
                 else None
             ),
             "components": {
                 "base_ppg": DST_BASELINE,
-                "weather_adj": round(dst_weather, 1),
+                "base_label": "League-average defense",
+                "terms": _terms(r["terms"]),
+                "model_proj": round(r["model"], 1),
+                "external_proj": round(ext, 1) if ext is not None else None,
+                "blend_weight": round(w, 2) if w is not None else None,
+                "weather_adj": round(next(v for k, v in r["terms"] if k == "Weather"), 1),
                 "opponent": opponent,
                 "opponent_implied_total": round(opp_implied, 1) if opp_implied is not None else None,
-                "matchup": matchup_label,
+                "expected_points_allowed": round(r["xpa"], 1),
+                "matchup": r["label"],
                 "week": game["week"] if game else None,
                 "home": game["home"] if game else None,
             },
         }
 
-    # Kickers: a flat league-average week — but a kicker on bye or ruled out
-    # still has to project to zero, or he'd pad lineups and live totals.
+    # Kickers: league-average kicker + how much his team should score + dome /
+    # weather, blended with Sleeper's K projection. On a bye or ruled out, 0.
     for p in kickers:
         reason = _unavailable(p)
         if reason:
             out[p.id] = _inactive_package(reason, current_week, K_BASELINE)
             continue
         game = next_opponent.get(p.team or "")
-        projected, sigma, confidence = K_BASELINE, K_STDEV, "low"
+        opponent = game["opponent"] if game else None
+        week = game["week"] if game else None
+        home_team = (p.team if game["home"] else opponent) if game else None
+        own_form = team_form.get(p.team or "") or {}
+        opp_form = team_form.get(opponent or "") or {}
+        r = kicker_model(
+            own_form.get("off_ppg"),
+            opp_form.get("def_pa_pg"),
+            (qb_change.get(p.team or "") or {}).get("pct", 0.0),
+            implied.get((p.team, week)) if game else None,
+            bool(STADIUMS.get(home_team or "", {}).get("dome")),
+            gc_by_team_week.get((p.team, week)) if game else None,
+        )
+        ext = external.get(p.id)
+        projected, w = _blend(r["model"], ext, game)
+        sigma, confidence = K_STDEV, "low"
         if _is_absent(p.injury_status):
             projected, sigma, confidence = 0.0, 0.0, "high"
         out[p.id] = {
-            "projected": projected,
+            "projected": round(projected, 1),
             "floor": round(max(0.0, projected - sigma), 1),
             "ceiling": round(projected + sigma, 1),
             "confidence": confidence,
@@ -685,15 +901,86 @@ async def compute_projections(
             "bye": False,
             "inactive_reason": None,
             "boost_reason": None,
+            "qb_reason": None,
             "defense_reason": None,
             "components": {
                 "base_ppg": K_BASELINE,
-                "opponent": game["opponent"] if game else None,
-                "week": game["week"] if game else None,
+                "base_label": "League-average kicker",
+                "terms": _terms(r["terms"]),
+                "model_proj": round(r["model"], 1),
+                "external_proj": round(ext, 1) if ext is not None else None,
+                "blend_weight": round(w, 2) if w is not None else None,
+                "expected_team_points": round(r["xpf"], 1) if r["xpf"] is not None else None,
+                "opponent": opponent,
+                "week": week,
                 "home": game["home"] if game else None,
             },
         }
     return out
+
+
+async def _team_form(db: AsyncSession, season: int) -> dict[str, dict]:
+    """team -> per-game scoring form for the DEF and kicker models:
+    ``off_ppg`` / ``def_pa_pg`` (points scored / allowed) and ``off_ints_pg`` /
+    ``def_ints_pg`` (interceptions thrown / forced). This season counts fully,
+    last season at TEAM_PRIOR_SEASON_WEIGHT, and every rate is blended with
+    TEAM_SHRINK_GAMES of league average so three games can't swing it.
+    ``{}`` when the results feed is unavailable (everyone league-average)."""
+    results = await get_team_results([season - 1, season])
+    if not results:
+        return {}
+
+    # Interceptions forced by each defense, from the passers' stat lines
+    # (each row's opponent is the defense that picked him off).
+    int_rows = (
+        await db.execute(
+            select(
+                PlayerStatsWeekly.season,
+                PlayerStatsWeekly.week,
+                PlayerStatsWeekly.opponent,
+                func.sum(PlayerStatsWeekly.interceptions),
+            )
+            .where(
+                PlayerStatsWeekly.season >= season - 1,
+                PlayerStatsWeekly.week <= REGULAR_SEASON_MAX_WEEK,
+                PlayerStatsWeekly.opponent.is_not(None),
+            )
+            .group_by(PlayerStatsWeekly.season, PlayerStatsWeekly.week, PlayerStatsWeekly.opponent)
+        )
+    ).all()
+    forced = {(s, w, team): float(n or 0) for s, w, team, n in int_rows}
+
+    acc: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"pf": 0.0, "pa": 0.0, "games": 0.0, "def_int": 0.0, "off_int": 0.0, "int_games": 0.0}
+    )
+    for r in results:
+        wt = 1.0 if r["season"] == season else TEAM_PRIOR_SEASON_WEIGHT
+        a = acc[r["team"]]
+        a["pf"] += wt * r["points_for"]
+        a["pa"] += wt * r["points_against"]
+        a["games"] += wt
+        key_def = (r["season"], r["week"], r["team"])
+        key_off = (r["season"], r["week"], r["opponent"])
+        if key_def in forced or key_off in forced:
+            a["def_int"] += wt * forced.get(key_def, 0.0)
+            a["off_int"] += wt * forced.get(key_off, 0.0)
+            a["int_games"] += wt
+
+    k = TEAM_SHRINK_GAMES
+    avg = LEAGUE_AVG_TEAM_TOTAL
+    form: dict[str, dict] = {}
+    for team, a in acc.items():
+        form[team] = {
+            "off_ppg": (a["pf"] + k * avg) / (a["games"] + k),
+            "def_pa_pg": (a["pa"] + k * avg) / (a["games"] + k),
+            "def_ints_pg": (
+                (a["def_int"] + k * AVG_INTS) / (a["int_games"] + k) if a["int_games"] else None
+            ),
+            "off_ints_pg": (
+                (a["off_int"] + k * AVG_INTS) / (a["int_games"] + k) if a["int_games"] else None
+            ),
+        }
+    return form
 
 
 async def _qb_change_context(
