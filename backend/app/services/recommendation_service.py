@@ -1,6 +1,7 @@
 """Grades stored start/sit recommendations once weekly stats land."""
 
 import logging
+import uuid
 
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,17 +51,13 @@ async def _points_for(
     return float(value) if value is not None else None
 
 
-async def evaluate_pending(db: AsyncSession) -> int:
-    """Grade every pending recommendation whose week's stats are available."""
-    pending = (
-        (
-            await db.execute(
-                select(Recommendation).where(Recommendation.result == "pending")
-            )
-        )
-        .scalars()
-        .all()
-    )
+async def evaluate_pending(db: AsyncSession, user_id: uuid.UUID | None = None) -> int:
+    """Grade pending recommendations whose week's stats are available — every
+    user's (the scheduled job) or just one user's (the on-demand endpoint)."""
+    query = select(Recommendation).where(Recommendation.result == "pending")
+    if user_id is not None:
+        query = query.where(Recommendation.user_id == user_id)
+    pending = (await db.execute(query)).scalars().all()
     graded = 0
     loaded: dict[tuple[int, int], bool] = {}
     for rec in pending:

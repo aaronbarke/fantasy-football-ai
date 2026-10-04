@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import Navbar from "@/components/Navbar";
+import AiMarkdown from "@/components/AiMarkdown";
 import PageHeader from "@/components/PageHeader";
 import { api } from "@/lib/api";
 import type { PlayerCard } from "@/lib/types";
@@ -14,8 +15,6 @@ import {
   TrendingUp,
   X,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 function PlayerSearchAdd({
   onAdd,
@@ -533,8 +532,7 @@ export default function TradePage() {
             </div>
 
             <div className="prose-sm rounded-xl border border-gray-200 bg-white p-6 text-sm leading-relaxed">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+              <AiMarkdown
                 components={{
                   table: ({ children }) => (
                     <table className="mb-3 w-full border-collapse text-xs">
@@ -554,7 +552,7 @@ export default function TradePage() {
                 }}
               >
                 {result.analysis}
-              </ReactMarkdown>
+              </AiMarkdown>
             </div>
           </div>
         )}

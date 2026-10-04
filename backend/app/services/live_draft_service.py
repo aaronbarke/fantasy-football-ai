@@ -17,6 +17,7 @@ import httpx
 
 from app.models import LeagueConnection
 from app.services.espn_service import PRO_TEAM_MAP, ESPNClient
+from app.utils.credentials import open_credentials
 from app.utils.player_id_map import espn_to_sleeper_map
 
 # ESPN team D/ST "players" have ids of -(16000 + proTeamId), e.g. -16002 for the
@@ -272,7 +273,7 @@ async def espn_live_draft_state(db, conn: LeagueConnection) -> dict:
     Degrades to a `not_started` shell on any fetch error — a live draft room
     should keep working off the static board rather than blow up mid-pick.
     """
-    creds = conn.credentials or {}
+    creds = open_credentials(conn.credentials)
     client = ESPNClient(
         conn.league_id,
         conn.season,

@@ -75,3 +75,16 @@ export function timeAgo(iso: string | null | undefined): string {
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
 }
+
+/** True for absolute http(s) URLs — the only kind safe to put in an href that
+ * came from outside the app (a `javascript:` URL would run in our origin, with
+ * the user's tokens in reach, when clicked). */
+export function isHttpUrl(url: unknown): url is string {
+  if (typeof url !== "string") return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
+}

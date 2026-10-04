@@ -12,7 +12,7 @@ context to give grounded, data-backed advice.
 **🔗 Live:** [fantasy-football-ai-theta.vercel.app](https://fantasy-football-ai-theta.vercel.app) &nbsp;·&nbsp;
 one-click **Demo login** on the sign-in page skips signup and lands on a fully seeded league.
 
-**Stack:** Next.js 14 · TypeScript · Tailwind · FastAPI (Python 3.13, async) · PostgreSQL 16 · Redis (optional cache) · Claude API · APScheduler · Docker · Vercel + Railway
+**Stack:** Next.js 15 · TypeScript · Tailwind · FastAPI (Python 3.13, async) · PostgreSQL 16 · Redis (optional cache) · Claude API · APScheduler · Docker · Vercel + Railway
 
 ### Why this project
 
@@ -68,7 +68,7 @@ one-click **Demo login** on the sign-in page skips signup and lands on a fully s
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│   Next.js 14 Frontend (TypeScript + Tailwind)        │
+│   Next.js 15 Frontend (TypeScript + Tailwind)        │
 │   Dashboard · Chat · Roster · Matchup · Waivers      │
 └──────────────────────┬───────────────────────────────┘
                        │ REST (JWT auth)

@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,9 +37,36 @@ class Settings(BaseSettings):
     # Comma-separated emails allowed to hit admin endpoints (empty = dev only)
     admin_emails: str = ""
 
+    # Reverse proxies in front of the app (Railway/Render/Fly add one). The
+    # client IP for rate limiting is read from that many hops back in
+    # X-Forwarded-For. Unset: 1 in production, 0 (direct connections) in dev.
+    trusted_proxy_count: int | None = None
+
+    # Key for encrypting stored ESPN cookies (a Fernet key). Unset: derived from
+    # JWT_SECRET, so rotating that secret means ESPN leagues must reconnect.
+    credentials_key: str = ""
+
+    # Daily caps on Claude calls, so a public demo or a scripted account can't
+    # run up the API bill. The demo account is shared, so it gets a per-IP cap
+    # plus a ceiling across every demo visitor.
+    ai_daily_limit_per_user: int = 100
+    ai_daily_limit_demo_per_ip: int = 20
+    ai_daily_limit_demo_total: int = 300
+
+    @field_validator("trusted_proxy_count", mode="before")
+    @classmethod
+    def _blank_means_unset(cls, value):
+        return None if value == "" else value
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def proxy_hops(self) -> int:
+        if self.trusted_proxy_count is not None:
+            return max(self.trusted_proxy_count, 0)
+        return 1 if self.is_production else 0
 
     @property
     def admin_email_list(self) -> list[str]:

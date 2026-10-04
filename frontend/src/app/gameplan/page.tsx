@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Navbar from "@/components/Navbar";
+import AiMarkdown from "@/components/AiMarkdown";
 import { EmptyState, LoadingState, ErrorState } from "@/components/PageState";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
@@ -10,8 +11,6 @@ import PlayerAvatar from "@/components/PlayerAvatar";
 import ProjectionMath, { type ProjectionBreakdown } from "@/components/ProjectionMath";
 import { injuryTextColor, positionColor } from "@/lib/utils";
 import { ArrowRightLeft, Sparkles } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 interface PlanPlayer extends ProjectionBreakdown {
   id: string;
@@ -320,9 +319,7 @@ export default function GamePlanPage() {
 
             {brief && (
               <div className="prose-sm mt-6 rounded-xl callout p-6 text-sm leading-relaxed">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {brief}
-                </ReactMarkdown>
+                <AiMarkdown>{brief}</AiMarkdown>
               </div>
             )}
 

@@ -2,12 +2,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models import LeagueConnection, MockDraft, Roster, User
+from app.models import LeagueConnection, MockDraft, MockDraftPick, Roster, User
 from app.services.adp_service import SCORING_FORMATS
 from app.services.draft_service import recommend_picks
 from app.services.mock_draft_service import (
@@ -24,6 +24,10 @@ from app.utils.security import get_current_user
 
 router = APIRouter(prefix="/api/mock", tags=["mock draft"])
 
+# Each mock stores a row per pick (hundreds per draft); keep the newest few so
+# repeated drafting can't grow the tables without bound.
+MAX_MOCKS_PER_USER = 50
+
 
 class CreateMockRequest(BaseModel):
     connection_id: str | None = None
@@ -34,7 +38,7 @@ class CreateMockRequest(BaseModel):
 
 
 class MockPickRequest(BaseModel):
-    player_id: str
+    player_id: str = Field(max_length=50)
 
 
 async def _league_defaults(
@@ -107,6 +111,25 @@ async def _state(db: AsyncSession, draft: MockDraft, picks: list[dict]) -> dict:
     }
 
 
+async def _prune_old_mocks(db: AsyncSession, user: User, keep: uuid.UUID) -> None:
+    stale = (
+        (
+            await db.execute(
+                select(MockDraft.id)
+                .where(MockDraft.user_id == user.id, MockDraft.id != keep)
+                .order_by(MockDraft.created_at.desc())
+                .offset(MAX_MOCKS_PER_USER - 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if stale:
+        await db.execute(delete(MockDraftPick).where(MockDraftPick.draft_id.in_(stale)))
+        await db.execute(delete(MockDraft).where(MockDraft.id.in_(stale)))
+        await db.commit()
+
+
 @router.post("", status_code=201)
 async def create_mock(
     body: CreateMockRequest,
@@ -169,6 +192,7 @@ async def create_mock(
     db.add(draft)
     await db.commit()
     await db.refresh(draft)
+    await _prune_old_mocks(db, user, keep=draft.id)
 
     picks = await advance(db, draft, pool, make_rng(draft.id, 0))
     return await _state(db, draft, picks)

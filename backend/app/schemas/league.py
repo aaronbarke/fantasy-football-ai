@@ -1,11 +1,17 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+
+# These values are spliced into Sleeper/ESPN request paths and cookies, so they
+# are held to the shapes those platforms actually use.
+NUMERIC_ID = r"^\d{1,32}$"
 
 
 class SleeperLookupRequest(BaseModel):
-    username: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    username: str = Field(min_length=1, max_length=64)
 
 
 class SleeperLeagueOption(BaseModel):
@@ -23,13 +29,16 @@ class SleeperLookupResponse(BaseModel):
 
 
 class ConnectLeagueRequest(BaseModel):
-    platform: str  # sleeper | espn
-    league_id: str
-    season: int
-    platform_user_id: str | None = None  # sleeper user_id
-    espn_s2: str | None = None
-    swid: str | None = None
-    team_id: str | None = None  # ESPN team selection
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    platform: str = Field(max_length=20)  # sleeper | espn
+    league_id: str = Field(pattern=NUMERIC_ID)
+    season: int = Field(ge=2000, le=2100)
+    platform_user_id: str | None = Field(default=None, pattern=NUMERIC_ID)  # sleeper user_id
+    # Cookie values: no whitespace, separators or quotes (they'd break the header)
+    espn_s2: str | None = Field(default=None, max_length=2048, pattern=r'^[^\s;,"\\]+$')
+    swid: str | None = Field(default=None, pattern=r"^\{?[0-9A-Fa-f-]{32,40}\}?$")
+    team_id: str | None = Field(default=None, pattern=r"^\d{1,10}$")  # ESPN team selection
 
 
 class LeagueConnectionResponse(BaseModel):

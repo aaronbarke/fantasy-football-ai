@@ -6,10 +6,10 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
-  clearTokens,
   getSelectedLeague,
   getToken,
   setSelectedLeague,
+  signOut,
 } from "@/lib/api";
 import type { LeagueConnection } from "@/lib/types";
 import {
@@ -213,7 +213,7 @@ export default function Navbar() {
               aria-label="Sign out"
               title="Sign out"
               onClick={() => {
-                clearTokens();
+                signOut();
                 queryClient.clear();
                 window.location.href = "/login";
               }}

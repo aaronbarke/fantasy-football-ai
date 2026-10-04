@@ -5,6 +5,7 @@ espn_s2 and SWID cookies, which the user copies from their browser session.
 """
 
 import json
+from urllib.parse import quote
 
 import httpx
 
@@ -61,7 +62,8 @@ class ESPNClient:
 
     @property
     def _league_url(self) -> str:
-        return f"{BASE_URL}/seasons/{self.season}/segments/0/leagues/{self.league_id}"
+        league = quote(str(self.league_id), safe="")
+        return f"{BASE_URL}/seasons/{int(self.season)}/segments/0/leagues/{league}"
 
     async def _get(self, views: list[str], extra_headers: dict | None = None) -> dict:
         params = [("view", v) for v in views]

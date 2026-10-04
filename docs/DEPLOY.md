@@ -16,7 +16,7 @@ below is free-tier-friendly.
    | `ENVIRONMENT` | `production` |
    | `DATABASE_URL` | `postgresql+asyncpg://…` (from the Postgres plugin; swap the scheme to `postgresql+asyncpg`) |
    | `REDIS_URL` | from the Redis plugin |
-   | `JWT_SECRET` | a long random string (the app refuses to boot in prod without one) |
+   | `JWT_SECRET` | 32+ random characters, e.g. `openssl rand -hex 32` (the app refuses to boot in prod with the default, and warns if it's short) |
    | `ANTHROPIC_API_KEY` | your Anthropic key |
    | `ODDS_API_KEY` | your The-Odds-API key (betting page) |
    | `GOOGLE_CLIENT_ID` | optional — enables Google sign-in |
@@ -24,6 +24,9 @@ below is free-tier-friendly.
    | `CORS_ORIGINS` | your Vercel URL, e.g. `https://ffai.vercel.app` |
    | `ENABLE_SCHEDULER` | `true` (weekly stats/odds/injury refresh) |
    | `CURRENT_SEASON` | e.g. `2026` |
+   | `CREDENTIALS_KEY` | optional — Fernet key for the stored ESPN cookies (see `.env.example`); unset, it's derived from `JWT_SECRET` |
+   | `TRUSTED_PROXY_COUNT` | optional — proxies in front of the API (default `1` in production, which fits Railway) |
+   | `AI_DAILY_LIMIT_PER_USER` / `AI_DAILY_LIMIT_DEMO_PER_IP` / `AI_DAILY_LIMIT_DEMO_TOTAL` | optional — daily Claude-call caps (defaults 100 / 20 / 300) |
 
 4. Deploy. Note the public backend URL (e.g. `https://ffai-api.up.railway.app`).
 5. **Seed the database once** (the schema auto-creates on boot via
@@ -61,7 +64,17 @@ below is free-tier-friendly.
 
 - The backend **fails fast in production** if `JWT_SECRET` is still the default.
 - Admin endpoints require your email in `ADMIN_EMAILS`; the shared demo account
-  is blocked from sync/claim/admin actions.
+  is blocked from sync/claim/admin actions. Every address in `ADMIN_EMAILS`
+  should already have an account — signup doesn't verify email ownership, so an
+  unclaimed admin address could be registered by someone else.
+- Security posture in production: `/docs` and `/openapi.json` are off, CORS
+  allows only `CORS_ORIGINS`, every Claude-backed route is rate limited and
+  capped per day (the demo shares one pool), ESPN cookies are encrypted at
+  rest, and each demo visitor's chat stays in memory for their session instead
+  of the shared account's history.
+- Rotating `JWT_SECRET` signs everyone out, and — unless `CREDENTIALS_KEY` is
+  set — makes stored ESPN cookies unreadable, so private ESPN leagues need to
+  reconnect.
 - A `frontend/Dockerfile` is included for platforms that build via Docker, but
   Vercel is simpler for Next.js. `NEXT_PUBLIC_*` vars are baked at build time, so
   pass them as build args when using the Dockerfile.

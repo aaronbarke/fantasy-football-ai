@@ -4,10 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import Navbar from "@/components/Navbar";
+import AiMarkdown from "@/components/AiMarkdown";
 import { EmptyState, ErrorState } from "@/components/PageState";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
-import { injuryColor, positionColor, timeAgo } from "@/lib/utils";
+import { injuryColor, isHttpUrl, positionColor, timeAgo } from "@/lib/utils";
 import {
   RotateCcw,
   Sparkles,
@@ -17,8 +18,6 @@ import {
   Play,
   AlertTriangle,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 interface BoardPlayer {
   player_id: string;
@@ -104,6 +103,14 @@ interface LiveDraft {
 
 type DraftMark = "me" | "gone";
 const POSITIONS = ["ALL", "QB", "RB", "WR", "TE"];
+
+/** The numeric ESPN league id in a pasted id or draft-room URL, else null. */
+function espnLeagueId(input: string): string | null {
+  const raw = input.trim();
+  const id = raw.match(/leagueId=(\d+)/)?.[1] ?? raw;
+  return /^\d{1,20}$/.test(id) ? id : null;
+}
+
 const STATE_KEY = "draft_room_state";
 const SETTINGS_KEY = "draft_room_settings";
 
@@ -297,7 +304,9 @@ export default function DraftPage() {
   const { data: liveExt } = useQuery({
     queryKey: ["liveDraftExternal", externalId],
     queryFn: () =>
-      api<LiveDraft>(`/api/draft/live-external?espn_league_id=${externalId}`),
+      api<LiveDraft>(
+        `/api/draft/live-external?espn_league_id=${encodeURIComponent(externalId)}`,
+      ),
     enabled: externalSync,
     refetchInterval: 6000,
   });
@@ -622,9 +631,8 @@ export default function DraftPage() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                const raw = externalInput.trim();
-                const idMatch = raw.match(/leagueId=(\d+)/);
-                setExternalId(idMatch ? idMatch[1] : raw);
+                const id = espnLeagueId(externalInput);
+                if (id) setExternalId(id);
               }}
               className="flex items-center gap-2"
             >
@@ -639,7 +647,7 @@ export default function DraftPage() {
               {!externalSync ? (
                 <button
                   type="submit"
-                  disabled={!externalInput.trim()}
+                  disabled={!espnLeagueId(externalInput)}
                   className="rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:bg-accent-hover disabled:opacity-50"
                 >
                   Sync
@@ -836,11 +844,11 @@ export default function DraftPage() {
                               FA
                             </span>
                           )}
-                          {news && news.length > 0 && (
+                          {news && news.length > 0 && isHttpUrl(news[0].url) && (
                             <a
                               href={news[0].url}
                               target="_blank"
-                              rel="noreferrer"
+                              rel="noopener noreferrer"
                               title={`${news[0].headline} · ${timeAgo(news[0].published_at)}`}
                               className="text-gray-400 hover:text-accent"
                             >
@@ -1039,9 +1047,7 @@ export default function DraftPage() {
 
             {advice && (
               <div className="rounded-xl callout p-4 text-sm leading-relaxed">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {advice}
-                </ReactMarkdown>
+                <AiMarkdown>{advice}</AiMarkdown>
               </div>
             )}
           </div>

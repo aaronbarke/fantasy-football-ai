@@ -5,8 +5,10 @@ services:
       POSTGRES_USER: fantasy
       POSTGRES_PASSWORD: fantasy
       POSTGRES_DB: fantasy
+    # Loopback only: these default credentials shouldn't be reachable from
+    # the rest of the network (e.g. on public Wi-Fi).
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -18,12 +20,12 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   backend:
     build: ./backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://fantasy:fantasy@postgres:5432/fantasy
       REDIS_URL: redis://redis:6379/0

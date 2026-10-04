@@ -2,10 +2,17 @@
 Rate limit guidance: stay under 1000 calls/minute."""
 
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 BASE_URL = "https://api.sleeper.app/v1"
+
+
+def _seg(value: object) -> str:
+    """One URL path segment. Usernames and ids come from users, so "/", "?"
+    and ".." are encoded rather than steering the request to another endpoint."""
+    return quote(str(value), safe="")
 
 
 class SleeperError(Exception):
@@ -27,25 +34,25 @@ class SleeperClient:
         return resp.json()
 
     async def get_user(self, username_or_id: str) -> dict | None:
-        return await self._get(f"/user/{username_or_id}")
+        return await self._get(f"/user/{_seg(username_or_id)}")
 
     async def get_user_leagues(self, user_id: str, season: int) -> list[dict]:
-        return await self._get(f"/user/{user_id}/leagues/nfl/{season}") or []
+        return await self._get(f"/user/{_seg(user_id)}/leagues/nfl/{int(season)}") or []
 
     async def get_league(self, league_id: str) -> dict | None:
-        return await self._get(f"/league/{league_id}")
+        return await self._get(f"/league/{_seg(league_id)}")
 
     async def get_rosters(self, league_id: str) -> list[dict]:
-        return await self._get(f"/league/{league_id}/rosters") or []
+        return await self._get(f"/league/{_seg(league_id)}/rosters") or []
 
     async def get_league_users(self, league_id: str) -> list[dict]:
-        return await self._get(f"/league/{league_id}/users") or []
+        return await self._get(f"/league/{_seg(league_id)}/users") or []
 
     async def get_matchups(self, league_id: str, week: int) -> list[dict]:
-        return await self._get(f"/league/{league_id}/matchups/{week}") or []
+        return await self._get(f"/league/{_seg(league_id)}/matchups/{int(week)}") or []
 
     async def get_transactions(self, league_id: str, week: int) -> list[dict]:
-        return await self._get(f"/league/{league_id}/transactions/{week}") or []
+        return await self._get(f"/league/{_seg(league_id)}/transactions/{int(week)}") or []
 
     async def get_nfl_state(self) -> dict:
         """Current season/week per Sleeper — drives 'what week is it' everywhere."""
@@ -56,4 +63,4 @@ class SleeperClient:
         return await self._get("/players/nfl") or {}
 
     async def get_trending(self, kind: str = "add", limit: int = 50) -> list[dict]:
-        return await self._get(f"/players/nfl/trending/{kind}?limit={limit}") or []
+        return await self._get(f"/players/nfl/trending/{_seg(kind)}?limit={int(limit)}") or []

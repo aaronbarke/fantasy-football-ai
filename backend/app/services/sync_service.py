@@ -28,6 +28,7 @@ from app.services.espn_service import (
 from app.services.schedule_service import ensure_schedule
 from app.services.sleeper_service import SleeperClient
 from app.utils.constants import FANTASY_POSITIONS
+from app.utils.credentials import is_sealed, open_credentials, seal_credentials
 from app.utils.fantasy_math import scoring_type_from_settings
 from app.utils.player_id_map import espn_to_sleeper_map, normalize_name
 
@@ -355,7 +356,7 @@ async def sync_live_scores(db: AsyncSession, conn: LeagueConnection) -> None:
             )
         await _replace_live_scores(db, conn, week, player_points)
     elif conn.platform == "espn":
-        creds = conn.credentials or {}
+        creds = open_credentials(conn.credentials)
         client = ESPNClient(
             league_id=conn.league_id, season=conn.season,
             espn_s2=creds.get("espn_s2"), swid=creds.get("swid"),
@@ -456,7 +457,10 @@ def _espn_player_points(side: dict, espn_map: dict[str, str]) -> dict[str, float
 
 
 async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
-    creds = conn.credentials or {}
+    creds = open_credentials(conn.credentials)
+    if creds and not is_sealed(conn.credentials):
+        # Saved before cookies were encrypted: seal them with this sync's commit.
+        conn.credentials = seal_credentials(creds)
     client = ESPNClient(
         league_id=conn.league_id,
         season=conn.season,

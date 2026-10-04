@@ -54,12 +54,17 @@ def classify_intent(question: str) -> str:
     return best if scores[best] > 0 else "general"
 
 
+# A question names a handful of players; a message stuffed with capitalized
+# words shouldn't turn into hundreds of ILIKE clauses.
+MAX_NAME_CANDIDATES = 24
+
+
 async def find_mentioned_players(
     db: AsyncSession, question: str, limit: int = 4
 ) -> list[Player]:
     """Match capitalized word pairs and known-name fragments in the question
     against the players table."""
-    candidates: set[str] = set()
+    candidates: dict[str, None] = {}  # insertion-ordered set
     # Lowercase capitalized question words first, so "Start Addison" isn't read
     # as a two-word name (and doesn't swallow "Addison").
     question = re.sub(
@@ -70,7 +75,7 @@ async def find_mentioned_players(
     # Word pairs like "Ja'Marr Chase", "CeeDee Lamb"
     pair_words: set[str] = set()
     for m in re.finditer(r"\b([A-Z][\w.'-]+)\s+([A-Z][\w.'-]+)\b", question):
-        candidates.add(f"{m.group(1)} {m.group(2)}")
+        candidates[f"{m.group(1)} {m.group(2)}"] = None
         pair_words.update((m.group(1), m.group(2)))
     # Single capitalized words (last names) as fallback — but never a word
     # that's already part of a full name: "Jordan Addison" must not also search
@@ -78,12 +83,13 @@ async def find_mentioned_players(
     for m in re.finditer(r"\b([A-Z][a-z][\w.'-]{2,})\b", question):
         word = m.group(1)
         if word not in pair_words and word.lower() not in _NOT_NAMES:
-            candidates.add(word)
+            candidates[word] = None
+    names = list(candidates)[:MAX_NAME_CANDIDATES]
 
-    if not candidates:
+    if not names:
         return []
 
-    clauses = [Player.full_name.ilike(f"%{c}%") for c in candidates]
+    clauses = [Player.full_name.ilike(f"%{c}%") for c in names]
     result = await db.execute(
         select(Player)
         .where(or_(*clauses), Player.position.is_not(None))
@@ -93,7 +99,7 @@ async def find_mentioned_players(
     players = list(result.scalars().all())
 
     # Prefer exact full-name matches, then dedupe
-    exact = [p for p in players if p.full_name in candidates]
+    exact = [p for p in players if p.full_name in names]
     rest = [p for p in players if p not in exact]
     out: list[Player] = []
     seen: set[str] = set()

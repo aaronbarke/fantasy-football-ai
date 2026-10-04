@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from app.models import User
 from app.services.ai_service import generate_response
 from app.services.betting_service import get_line_board
-from app.utils.security import get_current_user
+from app.utils.security import ai_quota, get_current_user
 
 router = APIRouter(prefix="/api/betting", tags=["betting"])
 
@@ -27,7 +27,7 @@ async def betting_lines(user: User = Depends(get_current_user)):
 
 
 @router.post("/analysis")
-async def betting_analysis(user: User = Depends(get_current_user)):
+async def betting_analysis(user: User = Depends(ai_quota)):
     board = await get_line_board()
     context = {"question_type": "betting", "betting": {"games": board[:8]}}
     analysis = await generate_response(ANALYSIS_QUESTION, context)

@@ -3,12 +3,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Navbar from "@/components/Navbar";
+import AiMarkdown from "@/components/AiMarkdown";
 import { EmptyState, LoadingState, ErrorState } from "@/components/PageState";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import { Sparkles } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 interface PriceEntry {
   book: string;
@@ -135,9 +134,7 @@ export default function BettingPage() {
 
         {analysis && (
           <div className="prose-sm mt-6 rounded-xl callout p-6 text-sm leading-relaxed">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {analysis}
-            </ReactMarkdown>
+            <AiMarkdown>{analysis}</AiMarkdown>
           </div>
         )}
 

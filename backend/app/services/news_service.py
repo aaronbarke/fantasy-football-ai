@@ -38,8 +38,13 @@ def _published(raw: str | None) -> datetime | None:
 
 
 def _article_url(article: dict) -> str | None:
-    web = ((article.get("links") or {}).get("web") or {}).get("href")
-    return web or (article.get("links") or {}).get("api", {}).get("news", {}).get("href")
+    """The article's web link. Only http(s): the URL becomes a clickable link
+    in the draft room, where a javascript: URL would run in our origin."""
+    links = article.get("links") or {}
+    url = (links.get("web") or {}).get("href") or links.get("api", {}).get("news", {}).get("href")
+    if not isinstance(url, str) or not url.lower().startswith(("https://", "http://")):
+        return None
+    return url
 
 
 async def fetch_news(limit: int = FEED_LIMIT) -> list[dict]:
