@@ -111,16 +111,29 @@ async def test_snapshots_freeze_at_kickoff(db: AsyncSession):
     assert {r["player_id"] for r in lineup.recommended} == {"qb", "rb1"}
     assert lineup.actual_starters == ["qb", "rb2"]
 
-    # After the early games kick off, their players and the lineup are frozen;
-    # the late game's player can still be updated.
+    # After the early games kick off, their players and our lineup are frozen;
+    # the late game's player can still be updated, and so can the lineup the
+    # manager actually plays (later slots can still change).
     for s in snaps.values():
         s.projected = -1.0
+    roster = (await db.execute(select(Roster))).scalar_one()
+    roster.starters = ["qb", "rb1"]
     await db.commit()
     later = now + timedelta(hours=3)
     await snapshot_week(db, now=later)
     snaps = {s.player_id: s for s in (await db.execute(select(ProjectionSnapshot))).scalars().all()}
     assert snaps["qb"].projected == -1.0 and snaps["rb1"].projected == -1.0   # locked
     assert snaps["rb2"].projected > 0                                         # re-captured
+    lineup = (await db.execute(select(LineupSnapshot))).scalar_one()
+    assert {r["player_id"] for r in lineup.recommended} == {"qb", "rb1"}      # our pick, frozen
+    assert lineup.actual_starters == ["qb", "rb1"]                            # theirs, followed
+
+    # Once the week's last game kicks off, nothing changes anymore.
+    roster.starters = ["qb"]
+    await db.commit()
+    await snapshot_week(db, now=now + timedelta(hours=6))
+    lineup = (await db.execute(select(LineupSnapshot))).scalar_one()
+    assert lineup.actual_starters == ["qb", "rb1"]
 
 
 # --- grading -------------------------------------------------------------------------
@@ -150,6 +163,20 @@ def test_grade_lineup_against_best_in_hindsight():
     assert g["your_points"] == 43.0      # kicker isn't counted
     assert g["should_have_started"] == ["rb2"] and g["should_have_sat"] == ["rb1"]
     assert g["swaps"][0]["result"] == "loss"
+    # They started rb2 over our rb1 — graded on our lineup, but called out.
+    assert g["your_changes"] == [
+        {"started": "rb2", "started_points": 14.0, "instead_of": "rb1", "instead_points": 6.0}
+    ]
+
+
+def test_grade_lineup_when_the_played_lineup_is_unknown():
+    snap = _lineup_snapshot(
+        roster=["qb"], actual_starters=[],
+        recommended=[{"slot": "QB", "player_id": "qb"}], swaps=[],
+    )
+    g = grade_lineup(snap, {"qb": 18.0}, {"qb": "QB"})
+    assert g["correct"] == 1 and g["recommended_points"] == 18.0
+    assert g["your_points"] is None and g["your_changes"] is None
 
 
 async def test_grading_waits_for_the_week_then_scores_dnp_as_zero(db: AsyncSession):
@@ -202,6 +229,8 @@ async def test_report_numbers(db: AsyncSession):
                           grade={"slots": 2, "correct": 1, "recommended_points": 20.0,
                                  "best_points": 25.0, "your_points": 18.0,
                                  "should_have_started": ["c"], "should_have_sat": ["b"],
+                                 "your_changes": [{"started": "c", "started_points": 8.0,
+                                                   "instead_of": "b", "instead_points": 10.0}],
                                  "swaps": [{"slot": "RB", "start": "a", "sit": "c",
                                             "start_points": 14.0, "sit_points": 8.0,
                                             "result": "win"}]}))
@@ -223,8 +252,15 @@ async def test_report_numbers(db: AsyncSession):
 
     lt = r["lineups"]["totals"]
     assert lt["correct"] == 1 and lt["slots"] == 2
-    assert lt["avg_points_left"] == 5.0 and lt["avg_vs_your_lineup"] == 2.0
-    assert r["lineups"]["weeks"][0]["should_have_started"] == ["C"]
+    assert lt["avg_points_left"] == 5.0
+    assert lt["weeks_with_your_lineup"] == 1 and lt["weeks_followed"] == 0
+    assert lt["avg_your_changes_net"] == -2.0     # your lineup scored 2 less than ours
+    week = r["lineups"]["weeks"][0]
+    assert week["should_have_started"] == ["C"]
+    assert week["followed_our_lineup"] is False
+    assert week["your_changes"] == [
+        {"started": "C", "started_points": 8.0, "instead_of": "B", "instead_points": 10.0}
+    ]
     assert r["start_sit"]["game_plan"]["wins"] == 1
     assert r["start_sit"]["chat"]["losses"] == 1
 

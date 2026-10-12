@@ -5,8 +5,10 @@ Three steps:
 1. **Snapshot** (every half hour, see the scheduler). For the current NFL week,
    save each skill player's projection until his game kicks off — so the stored
    number is the last one anyone saw before setting a lineup — and each league
-   team's recommended lineup + suggested swaps until the week's main slate
-   kicks off.
+   team's projected-best lineup + suggested swaps until the week's main slate
+   kicks off. That lineup is what gets graded, whatever the manager actually
+   starts. The lineup they did play keeps updating until the week's last
+   kickoff (later games' slots can still change), for comparison only.
 2. **Grade** (once the week is over and nflverse stats have landed). A
    projection's actual is the player's fantasy points in that scoring format; a
    player with no stat line once the week is loaded didn't play and scored 0.
@@ -165,50 +167,57 @@ async def snapshot_week(db: AsyncSession, now: datetime | None = None) -> dict:
     # Recommended lineups — frozen at the main slate.
     lineups = 0
     lock = lineup_lock(list(kickoff_by_team.values()))
-    if lock is not None and now < lock:
-        for c in conns:
-            if not c.team_id:
-                continue
-            mine = next((r for r in rosters_by_conn[c.id] if r.team_id == c.team_id), None)
-            if mine is None or not mine.players:
-                continue
-            plan = await build_gameplan(db, c)
-            if plan.get("status") != "ok":
-                continue
-            snap = (
-                await db.execute(
-                    select(LineupSnapshot).where(
-                        LineupSnapshot.connection_id == c.id,
-                        LineupSnapshot.season == season,
-                        LineupSnapshot.week == week,
-                    )
+    last_kickoff = max(kickoff_by_team.values())
+    for c in conns:
+        if not c.team_id or lock is None or now >= last_kickoff:
+            continue
+        mine = next((r for r in rosters_by_conn[c.id] if r.team_id == c.team_id), None)
+        if mine is None or not mine.players:
+            continue
+        snap = (
+            await db.execute(
+                select(LineupSnapshot).where(
+                    LineupSnapshot.connection_id == c.id,
+                    LineupSnapshot.season == season,
+                    LineupSnapshot.week == week,
                 )
-            ).scalar_one_or_none()
-            if snap is None:
-                snap = LineupSnapshot(connection_id=c.id, season=season, week=week)
-                db.add(snap)
-            snap.scoring = c.scoring_type or "ppr"
-            snap.roster = list(mine.players)
-            snap.actual_starters = list(mine.starters or [])
-            snap.recommended = [
-                {
-                    "slot": row["slot"],
-                    "player_id": row["player"]["id"],
-                    "projected": row["player"].get("projected"),
-                }
-                for row in plan.get("lineup", [])
-                if row.get("player")
-            ]
-            snap.swaps = [
-                {
-                    "slot": s["slot"],
-                    "start": s["start"]["id"],
-                    "sit": s["sit"]["id"] if s.get("sit") else None,
-                }
-                for s in plan.get("swaps", [])
-            ]
-            snap.captured_at = now
-            lineups += 1
+            )
+        ).scalar_one_or_none()
+        if now >= lock:
+            # Our pick is frozen; keep following the lineup actually played,
+            # since later games' slots can still change after the early slate.
+            if snap is not None:
+                snap.actual_starters = list(mine.starters or [])
+                lineups += 1
+            continue
+        plan = await build_gameplan(db, c)
+        if plan.get("status") != "ok":
+            continue
+        if snap is None:
+            snap = LineupSnapshot(connection_id=c.id, season=season, week=week)
+            db.add(snap)
+        snap.scoring = c.scoring_type or "ppr"
+        snap.roster = list(mine.players)
+        snap.actual_starters = list(mine.starters or [])
+        snap.recommended = [
+            {
+                "slot": row["slot"],
+                "player_id": row["player"]["id"],
+                "projected": row["player"].get("projected"),
+            }
+            for row in plan.get("lineup", [])
+            if row.get("player")
+        ]
+        snap.swaps = [
+            {
+                "slot": s["slot"],
+                "start": s["start"]["id"],
+                "sit": s["sit"]["id"] if s.get("sit") else None,
+            }
+            for s in plan.get("swaps", [])
+        ]
+        snap.captured_at = now
+        lineups += 1
 
     await db.commit()
     return {"week": week, "projections": saved, "lineups": lineups}
@@ -267,11 +276,44 @@ async def _actual_points(
     return out
 
 
+def _lineup_changes(
+    recommended: list[str], yours: list[str], actual: dict[str, float], positions: dict[str, str]
+) -> list[dict]:
+    """Where the lineup played differs from ours: each player started instead of
+    one of our picks (same position first), with both players' points."""
+    ours_only = [pid for pid in recommended if pid not in yours]
+    changes = []
+    for pid in (pid for pid in yours if pid not in recommended):
+        match = next(
+            (o for o in ours_only if positions.get(o) == positions.get(pid)),
+            ours_only[0] if ours_only else None,
+        )
+        if match is not None:
+            ours_only.remove(match)
+        changes.append(
+            {
+                "started": pid,
+                "started_points": actual.get(pid, 0.0),
+                "instead_of": match,
+                "instead_points": actual.get(match, 0.0) if match else None,
+            }
+        )
+    for o in ours_only:  # one of our picks whose slot you left empty
+        changes.append(
+            {"started": None, "started_points": None,
+             "instead_of": o, "instead_points": actual.get(o, 0.0)}
+        )
+    return changes
+
+
 def grade_lineup(
     snapshot: LineupSnapshot, actual: dict[str, float], positions: dict[str, str]
 ) -> dict:
-    """How a recommended lineup did against the best lineup that roster could
-    have started in hindsight (QB/RB/WR/TE slots only)."""
+    """How the lineup we projected highest did against the best lineup that
+    roster could have started in hindsight (QB/RB/WR/TE slots only) — graded
+    the same whatever the manager actually started. The lineup they played is
+    compared alongside (``your_points`` / ``your_changes``), or left as None
+    when it was never captured."""
     slots = [r["slot"] for r in snapshot.recommended if r["slot"] not in NON_GRADED_SLOTS]
     recommended = [
         r["player_id"] for r in snapshot.recommended if r["slot"] not in NON_GRADED_SLOTS
@@ -310,7 +352,8 @@ def grade_lineup(
         "correct": len(set(recommended) & set(best)),
         "recommended_points": total(recommended),
         "best_points": total(best),
-        "your_points": total(yours),
+        "your_points": total(yours) if yours else None,
+        "your_changes": _lineup_changes(recommended, yours, actual, positions) if yours else None,
         "should_have_started": [pid for pid in best if pid not in recommended],
         "should_have_sat": [pid for pid in recommended if pid not in best],
         "swaps": swaps,
@@ -344,8 +387,10 @@ async def grade_pending(db: AsyncSession, now: datetime | None = None) -> dict:
             graded_proj += 1
 
     graded_lineups = 0
+    # graded_at, not grade: a JSON column can hold JSON null, which IS NULL
+    # doesn't match.
     lineup_pending = (
-        await db.execute(select(LineupSnapshot).where(LineupSnapshot.grade.is_(None)))
+        await db.execute(select(LineupSnapshot).where(LineupSnapshot.graded_at.is_(None)))
     ).scalars().all()
     for snap in lineup_pending:
         if not await is_ready(snap.season, snap.week):
@@ -457,6 +502,8 @@ async def accuracy_report(db: AsyncSession, conn: LeagueConnection) -> dict:
         if ls.grade:
             name_ids.update(ls.grade.get("should_have_started", []))
             name_ids.update(ls.grade.get("should_have_sat", []))
+            for ch in ls.grade.get("your_changes") or []:
+                name_ids.update(pid for pid in (ch["started"], ch["instead_of"]) if pid)
     graded_by_player: dict[str, list[ProjectionSnapshot]] = defaultdict(list)
     for s in graded:
         graded_by_player[s.player_id].append(s)
@@ -514,6 +561,7 @@ async def accuracy_report(db: AsyncSession, conn: LeagueConnection) -> dict:
         g = ls.grade
         if not g:
             continue
+        changes = g.get("your_changes")
         lineup_weeks.append(
             {
                 "week": ls.week,
@@ -524,6 +572,24 @@ async def accuracy_report(db: AsyncSession, conn: LeagueConnection) -> dict:
                 "your_points": g["your_points"],
                 "should_have_started": [name(pid) for pid in g["should_have_started"]],
                 "should_have_sat": [name(pid) for pid in g["should_have_sat"]],
+                "followed_our_lineup": changes == [] if changes is not None else None,
+                "your_changes": [
+                    {
+                        "started": name(ch["started"]) if ch["started"] else None,
+                        "started_points": (
+                            round(ch["started_points"], 1)
+                            if ch["started_points"] is not None
+                            else None
+                        ),
+                        "instead_of": name(ch["instead_of"]) if ch["instead_of"] else None,
+                        "instead_points": (
+                            round(ch["instead_points"], 1)
+                            if ch["instead_points"] is not None
+                            else None
+                        ),
+                    }
+                    for ch in changes
+                ] if changes is not None else None,
             }
         )
         for sw in g.get("swaps", []):
@@ -541,6 +607,7 @@ async def accuracy_report(db: AsyncSession, conn: LeagueConnection) -> dict:
     lineup_totals = None
     if lineup_weeks:
         n = len(lineup_weeks)
+        played = [w for w in lineup_weeks if w["your_points"] is not None]
         lineup_totals = {
             "weeks": n,
             "correct": sum(w["correct"] for w in lineup_weeks),
@@ -549,8 +616,17 @@ async def accuracy_report(db: AsyncSession, conn: LeagueConnection) -> dict:
             "avg_points_left": round(
                 sum(w["best_points"] - w["recommended_points"] for w in lineup_weeks) / n, 1
             ),
-            "avg_vs_your_lineup": round(
-                sum(w["recommended_points"] - w["your_points"] for w in lineup_weeks) / n, 1
+            # Your lineup vs ours: + means your changes gained points.
+            "weeks_with_your_lineup": len(played),
+            "weeks_followed": sum(1 for w in played if w["followed_our_lineup"]),
+            "avg_your_changes_net": (
+                round(
+                    sum(w["your_points"] - w["recommended_points"] for w in played)
+                    / len(played),
+                    1,
+                )
+                if played
+                else None
             ),
         }
 

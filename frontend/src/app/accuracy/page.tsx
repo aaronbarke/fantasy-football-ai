@@ -17,15 +17,24 @@ interface ErrorStats {
   within_range_pct: number | null;
 }
 
+interface LineupChange {
+  started: string | null;
+  started_points: number | null;
+  instead_of: string | null;
+  instead_points: number | null;
+}
+
 interface LineupWeek {
   week: number;
   correct: number;
   slots: number;
   recommended_points: number;
   best_points: number;
-  your_points: number;
+  your_points: number | null;
   should_have_started: string[];
   should_have_sat: string[];
+  followed_our_lineup: boolean | null;
+  your_changes: LineupChange[] | null;
 }
 
 interface TrackRecord {
@@ -67,7 +76,9 @@ interface TrackRecord {
       slots: number;
       perfect_weeks: number;
       avg_points_left: number;
-      avg_vs_your_lineup: number;
+      weeks_with_your_lineup: number;
+      weeks_followed: number;
+      avg_your_changes_net: number | null;
     } | null;
     weeks: LineupWeek[];
   };
@@ -99,6 +110,19 @@ function biasText(bias: number): string {
   return bias > 0
     ? `players beat us by ${bias.toFixed(1)} on average`
     : `we run ${Math.abs(bias).toFixed(1)} high on average`;
+}
+
+function changesText(w: LineupWeek): string {
+  if (w.your_changes == null) return "—";
+  if (w.your_changes.length === 0) return "Played our lineup";
+  return w.your_changes
+    .map((c) =>
+      c.started
+        ? `${c.started} (${c.started_points}) over our ${c.instead_of ?? "—"}` +
+          (c.instead_points != null ? ` (${c.instead_points})` : "")
+        : `left our ${c.instead_of} (${c.instead_points}) out`,
+    )
+    .join("; ");
 }
 
 function signed(n: number): string {
@@ -241,7 +265,8 @@ export default function AccuracyPage() {
                         <th className={thClass}>Our lineup</th>
                         <th className={thClass}>Best possible</th>
                         <th className={thClass}>Your lineup</th>
-                        <th className={thClass}>Should have started</th>
+                        <th className={thClass}>We should have started</th>
+                        <th className={thClass}>Your changes</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -253,20 +278,39 @@ export default function AccuracyPage() {
                           </td>
                           <td className={tdClass}>{w.recommended_points.toFixed(1)}</td>
                           <td className={tdClass}>{w.best_points.toFixed(1)}</td>
-                          <td className={tdClass}>{w.your_points.toFixed(1)}</td>
+                          <td className={tdClass}>
+                            {w.your_points != null ? w.your_points.toFixed(1) : "—"}
+                          </td>
                           <td className={`${tdClass} text-xs text-gray-600 dark:text-gray-300`}>
                             {w.should_have_started.length
                               ? `${w.should_have_started.join(", ")} over ${w.should_have_sat.join(", ")}`
                               : "Nothing — perfect lineup"}
+                          </td>
+                          <td className={`${tdClass} text-xs text-gray-600 dark:text-gray-300`}>
+                            {changesText(w)}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                {lineups && lineups.weeks_with_your_lineup > 0 && (
+                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                    You played our lineup in {lineups.weeks_followed} of{" "}
+                    {lineups.weeks_with_your_lineup} week
+                    {lineups.weeks_with_your_lineup === 1 ? "" : "s"}
+                    {lineups.avg_your_changes_net != null &&
+                      lineups.weeks_followed < lineups.weeks_with_your_lineup &&
+                      `; your changes ${
+                        lineups.avg_your_changes_net >= 0 ? "gained" : "cost"
+                      } ${Math.abs(lineups.avg_your_changes_net).toFixed(1)} pts a week on average`}
+                    .
+                  </p>
+                )}
                 <p className="mt-2 text-xs text-gray-500">
-                  QB/RB/WR/TE slots. &ldquo;Your lineup&rdquo; is who you had in as of the
-                  main Sunday slate.
+                  We grade the lineup we projected highest, saved before kickoff — whatever
+                  you actually start. Your lineup is shown alongside, as you played it.
+                  QB/RB/WR/TE slots only.
                 </p>
               </Section>
             )}
