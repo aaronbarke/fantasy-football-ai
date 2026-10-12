@@ -1,3 +1,4 @@
+from app.models.accuracy import LineupSnapshot, ProjectionSnapshot
 from app.models.chat import ChatMessage
 from app.models.depth import DepthChartEntry
 from app.models.draft import PlayerDraftProfile
@@ -35,4 +36,6 @@ __all__ = [
     "MockDraft",
     "MockDraftPick",
     "DepthChartEntry",
+    "ProjectionSnapshot",
+    "LineupSnapshot",
 ]

@@ -11,9 +11,12 @@ Cadence:
 - League sync: every 2 hours
 - Weather: Thu–Mon 6 AM + noon CT (game days only)
 - NFL schedule: daily 4 AM CT (flexed kickoff times; week resolution + byes)
+- Accuracy snapshots: every 30 min (pre-game projections + recommended lineups,
+  frozen at kickoff); grading Tue 7 AM + Wed 8 AM CT, after the stats land
 """
 
 import logging
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -135,6 +138,21 @@ async def send_injury_alerts(db, events) -> None:
             )
         event.notified = True
     await db.commit()
+
+
+async def job_snapshot_accuracy() -> None:
+    from app.services.accuracy_service import snapshot_week
+
+    async with SessionLocal() as db:
+        result = await snapshot_week(db)
+        logger.info("Accuracy snapshot: %s", result)
+
+
+async def job_grade_accuracy() -> None:
+    from app.services.accuracy_service import grade_pending
+
+    async with SessionLocal() as db:
+        await grade_pending(db)
 
 
 async def job_evaluate_recommendations() -> None:
@@ -265,6 +283,29 @@ def start_scheduler() -> None:
         job_evaluate_recommendations,
         CronTrigger(day_of_week="wed", hour=7),
         id="rec_eval",
+        misfire_grace_time=3600,
+    )
+    # Pre-game snapshots for the track record — also once right away, so a
+    # deploy mid-week doesn't wait half an hour to start capturing.
+    scheduler.add_job(
+        job_snapshot_accuracy,
+        IntervalTrigger(minutes=30),
+        id="accuracy_snapshot",
+        next_run_time=datetime.now(timezone.utc),
+        misfire_grace_time=600,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        job_grade_accuracy,
+        CronTrigger(day_of_week="tue", hour=7),
+        id="accuracy_grade_tue",
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        job_grade_accuracy,
+        CronTrigger(day_of_week="wed", hour=8),
+        id="accuracy_grade_wed",
         misfire_grace_time=3600,
     )
     scheduler.start()

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.database import create_all
 from app.routers import (
+    accuracy,
     admin,
     auth,
     betting,
@@ -167,6 +168,7 @@ app.include_router(gameplan.router)
 app.include_router(draft.router)
 app.include_router(mock_draft.router)
 app.include_router(admin.router)
+app.include_router(accuracy.router)
 
 
 @app.get("/health")

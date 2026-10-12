@@ -29,6 +29,7 @@ import {
   Radio,
   Sun,
   Swords,
+  Target,
   Trophy,
   Users,
   X,
@@ -45,6 +46,7 @@ const groups = [
       { href: "/roster", label: "Roster", icon: Users },
       { href: "/matchup", label: "Matchup", icon: Swords },
       { href: "/waivers", label: "Waiver wire", icon: Plus },
+      { href: "/accuracy", label: "Track record", icon: Target },
     ],
   },
   {
