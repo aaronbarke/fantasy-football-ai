@@ -62,10 +62,26 @@ export class ApiError extends Error {
   }
 }
 
+export const NETWORK_ERROR_MESSAGE =
+  "Couldn't reach the server — check your connection and try again.";
+
+/** fetch(), but a request that never got a readable response (offline, server
+ * down, or an error the browser hid behind CORS) becomes an ApiError with a
+ * plain-English message instead of the browser's bare "Failed to fetch".
+ * Aborts are rethrown untouched so callers can still ignore them. */
+async function request(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new ApiError(0, NETWORK_ERROR_MESSAGE);
+  }
+}
+
 async function tryRefresh(): Promise<boolean> {
   const refresh = typeof window !== "undefined" ? localStorage.getItem("refresh_token") : null;
   if (!refresh) return false;
-  const resp = await fetch(`${API_URL}/api/auth/refresh`, {
+  const resp = await request(`${API_URL}/api/auth/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh_token: refresh }),
@@ -82,7 +98,7 @@ export async function api<T>(
   retry = true
 ): Promise<T> {
   const token = getToken();
-  const resp = await fetch(`${API_URL}${path}`, {
+  const resp = await request(`${API_URL}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -122,7 +138,7 @@ export async function apiStream(
   retry = true
 ): Promise<void> {
   const token = getToken();
-  const resp = await fetch(`${API_URL}${path}`, {
+  const resp = await request(`${API_URL}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

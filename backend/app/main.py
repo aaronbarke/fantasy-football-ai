@@ -2,6 +2,7 @@ import logging
 import re
 from contextlib import asynccontextmanager
 
+import anthropic
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -155,6 +156,30 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+@app.exception_handler(anthropic.APIError)
+async def anthropic_error(request: Request, exc: anthropic.APIError):
+    """A failed Claude call (bad/revoked key, no credit, outage, rate limit)
+    would otherwise escape as a bare 500 from the outermost middleware — with
+    no CORS headers, so the browser only says "Failed to fetch". Handled here,
+    the response passes back through CORS and the page can show the message.
+    Details stay in the log: they can name accounts, request ids and quota."""
+    logger.error(
+        "Anthropic call failed on %s: %s %s",
+        request.url.path,
+        type(exc).__name__,
+        getattr(exc, "status_code", ""),
+    )
+    busy = isinstance(exc, (anthropic.RateLimitError, anthropic.APITimeoutError)) or (
+        getattr(exc, "status_code", None) == 529
+    )
+    message = (
+        "The AI service is busy right now — try again in a moment."
+        if busy
+        else "The AI service is unavailable right now — please try again later."
+    )
+    return JSONResponse(status_code=503, content={"detail": message})
+
 
 app.include_router(auth.router)
 app.include_router(leagues.router)
