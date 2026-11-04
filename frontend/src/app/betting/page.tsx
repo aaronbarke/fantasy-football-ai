@@ -127,7 +127,7 @@ export default function BettingPage() {
         ) : null}
         {!isLoading && !error && games.length === 0 && (
           <EmptyState
-            title="Waiting for the next slate"
+            title="No lines posted yet"
             description="No posted lines are available right now. Check back closer to game day to compare sportsbooks."
           />
         )}

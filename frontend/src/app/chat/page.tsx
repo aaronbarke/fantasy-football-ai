@@ -124,7 +124,7 @@ function ChatInner() {
       >
         <div className="chat-heading">
           <div>
-            <p className="eyebrow">Think it through</p>
+            <p className="eyebrow">Chat</p>
             <h1>Your assistant</h1>
           </div>
           <span className="chat-context">
@@ -137,11 +137,11 @@ function ChatInner() {
               <span className="empty-state-icon">
                 <MessageSquare className="h-6 w-6" />
               </span>
-              <p className="eyebrow">Your league. A little perspective.</p>
-              <h2>What’s your next move?</h2>
+              <p className="eyebrow">Knows your league</p>
+              <h2>What can I help with?</h2>
               <p>
-                Talk through a close call, explore a trade, or get a second look
-                at your lineup.
+                Ask about a close start/sit call, a trade, or your lineup for
+                this week.
               </p>
               <div className="chat-prompts">
                 {starters.map((s, i) => (

@@ -93,12 +93,12 @@ export default function ConnectPage() {
           </span>
           Your league
         </div>
-        <p className="eyebrow">Make it personal</p>
+        <p className="eyebrow">Last step</p>
         <h1 className="mt-3 text-4xl font-semibold tracking-tight">
           Bring your league.
         </h1>
         <p className="mt-4 text-sm leading-7 text-gray-500">
-          Connect your roster, matchups, and league settings. Start with the
+          We’ll bring in your roster, matchups, and league settings. Pick the
           platform you play on.
         </p>
         <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 sm:p-8">

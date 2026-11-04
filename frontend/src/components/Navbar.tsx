@@ -50,7 +50,7 @@ const groups = [
     ],
   },
   {
-    label: "Make your move",
+    label: "Tools",
     tone: "tone-violet",
     links: [
       { href: "/chat", label: "Ask your assistant", icon: MessageSquare },
@@ -208,7 +208,7 @@ export default function Navbar() {
           </Link>
           <div className="flex items-center justify-between pt-3">
             <span className="text-xs text-gray-500">
-              Built for your next move.
+              Good luck this week.
             </span>
             <button
               className="icon-button"

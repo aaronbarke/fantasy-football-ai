@@ -211,13 +211,13 @@ export default function GamePlanPage() {
       >
         <div className="page-heading">
           <div>
-            <p className="eyebrow">Your weekly edge</p>
+            <p className="eyebrow">This week</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
               Your game plan.
             </h1>
             <p className="page-description">
-              A clearer view of your lineup, the close calls, and the matchup
-              ahead.
+              Your best lineup, the close calls, and how you match up this
+              week.
             </p>
           </div>
           {plan?.status === "ok" && (
@@ -242,8 +242,8 @@ export default function GamePlanPage() {
 
         {plan?.status === "empty_roster" && (
           <EmptyState
-            title="Your lineup starts here"
-            description="Once your league has a roster, refresh it from Overview to explore your game plan. Preparing for draft day? Your draft room is ready."
+            title="No roster yet"
+            description="Once your roster is set, refresh your league from Overview to see your game plan. Still drafting? The draft room is ready."
             href="/draft"
             action="Open draft room"
           />

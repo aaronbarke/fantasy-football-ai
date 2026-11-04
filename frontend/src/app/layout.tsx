@@ -6,9 +6,9 @@ import Providers from "./providers";
 import PwaRegister from "@/components/PwaRegister";
 
 export const metadata: Metadata = {
-  title: "FFAI · Your fantasy football workspace",
+  title: "FFAI · Fantasy football assistant",
   description:
-    "Bring your fantasy roster, research, and next decision together. Game plans, player comparisons, and draft tools for your league.",
+    "Lineup advice, start/sit calls, trade help, and draft rankings for your Sleeper or ESPN league.",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "FFAI", statusBarStyle: "default" },
 };

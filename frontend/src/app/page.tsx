@@ -13,34 +13,34 @@ import PlaybookField from "@/components/PlaybookField";
 const features = [
   {
     icon: ClipboardList,
-    label: "01 · Every week",
+    label: "01 · Weekly lineups",
     tone: "tone-blue",
-    title: "Build a better lineup.",
-    body: "Compare projected points, player matchups, and your bench options in one weekly game plan.",
+    title: "Set your best lineup.",
+    body: "Projected points, matchups, and the close start/sit calls for your whole roster, every week.",
     href: "/gameplan",
   },
   {
     icon: MessageSquare,
-    label: "02 · Every question",
+    label: "02 · Ask anything",
     tone: "tone-violet",
-    title: "Talk it through.",
-    body: "Ask about your roster, a close start/sit call, or your next opponent. Get an explanation alongside the numbers.",
+    title: "Ask about your team.",
+    body: "Ask about a start/sit call, a trade, or your next opponent. You get an answer and the numbers behind it.",
     href: "/chat",
   },
   {
     icon: Radio,
-    label: "03 · Every pick",
+    label: "03 · Draft day",
     tone: "tone-amber",
-    title: "Be ready on the clock.",
-    body: "Explore player rankings, follow your draft, and practice your strategy with a mock draft.",
+    title: "Draft with a plan.",
+    body: "Rankings for your scoring settings, a live draft tracker, and mock drafts to practice with.",
     href: "/draft",
   },
   {
     icon: ArrowLeftRight,
-    label: "04 · Every opportunity",
+    label: "04 · Trades and waivers",
     tone: "tone-emerald",
-    title: "Find your next move.",
-    body: "Compare players, weigh both sides of a trade, and explore available talent in your league.",
+    title: "Make better trades.",
+    body: "Check both sides of a trade, compare players head to head, and find the best free agents in your league.",
     href: "/trade",
   },
 ];
@@ -55,7 +55,7 @@ export default function Landing() {
             href="#playbook"
             className="hidden text-sm font-medium text-gray-500 hover:text-ink sm:inline"
           >
-            The playbook
+            Features
           </a>
           <Link href="/login" className="button-secondary">
             Sign in
@@ -77,21 +77,20 @@ export default function Landing() {
             </span>
           </h1>
           <p className="hero-description">
-            Your fantasy season has a lot of moving parts. Bring your roster,
-            research, and next decision together with an assistant built around
-            your league.
+            Connect your league and get lineup advice, start/sit calls, trade
+            help, and draft rankings based on your actual roster.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link href="/login" className="button-primary !min-h-[44px] !px-5">
-              Find your edge
+              Get started
               <ArrowRight className="h-4 w-4" />
             </Link>
             <a href="#playbook" className="button-secondary !min-h-[44px] !px-5">
-              Explore the playbook
+              See how it works
             </a>
           </div>
           <div className="hero-integrations">
-            <span>Bring your league from</span>
+            <span>Works with</span>
             <strong>Sleeper</strong>
             <span className="h-3 w-px bg-gray-300" />
             <strong>ESPN</strong>
@@ -109,7 +108,7 @@ export default function Landing() {
           </div>
           <PlaybookField />
           <div className="field-caption">
-            <span>Prepared beats predictable.</span>
+            <span>Know who to start before kickoff.</span>
             <ArrowUpRight className="h-5 w-5" />
           </div>
         </div>
@@ -119,12 +118,12 @@ export default function Landing() {
           <div>
             <p className="eyebrow">From draft day to game day</p>
             <h2>
-              A little perspective.
-              <br />A better next move.
+              Help with every decision,
+              <br />all season long.
             </h2>
           </div>
           <p className="max-w-xs text-[15px] leading-relaxed text-gray-500">
-            The tools to make a call, with the context to understand it.
+            Every recommendation comes with the reasons behind it.
           </p>
         </div>
         <div className="feature-grid">
@@ -147,9 +146,9 @@ export default function Landing() {
       </section>
       <footer className="landing-footer">
         <Brand href="/" />
-        <p>Make an informed call. Enjoy the game.</p>
+        <p>Make better calls. Enjoy the game.</p>
         <Link href="/login" className="text-sm font-medium hover:text-accent">
-          Open your workspace <span aria-hidden="true">↗</span>
+          Get started <span aria-hidden="true">↗</span>
         </Link>
       </footer>
     </main>

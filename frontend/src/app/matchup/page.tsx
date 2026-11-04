@@ -378,8 +378,8 @@ export default function MatchupPage() {
         {error && <ErrorState retry={() => void refetch()} />}
         {!isLoading && !error && !ready && (
           <EmptyState
-            title="Meet your matchup soon"
-            description="Your comparison will appear when rosters and the league schedule are available. Refresh your league to check for updates."
+            title="No matchup yet"
+            description="Your matchup shows up once rosters and the league schedule are in. Refresh your league to check."
             href="/dashboard"
             action="Go to overview"
           />

@@ -119,23 +119,25 @@ export default function LoginPage() {
     <main className="auth-page">
       <aside className="auth-story stage">
         <Brand href="/" light />
-        <h2>Your next great call starts here.</h2>
+        <h2>Better lineups start here.</h2>
         <PlaybookField />
-        <p>Your roster, your research, one workspace.</p>
+        <p>Your roster, matchups, and advice in one place.</p>
       </aside>
       <div className="auth-form-area">
         <div className="auth-form">
           <div className="mb-10 sm:hidden">
             <Brand href="/" />
           </div>
-          <p className="eyebrow">Welcome to your workspace</p>
+          <p className="eyebrow">
+            {mode === "login" ? "Welcome back" : "New to FFAI"}
+          </p>
           <h1>
-            {mode === "login" ? "Back in the game." : "Make it your season."}
+            {mode === "login" ? "Back in the game." : "Create your account."}
           </h1>
           <p className="auth-description">
             {mode === "login"
-              ? "Sign in to pick up where you left off. Your league and your next decision are waiting."
-              : "Create an account, connect your league, and put your next move in perspective."}
+              ? "Sign in to see your league, your lineup, and this week's matchup."
+              : "Create an account, then connect your Sleeper or ESPN league."}
           </p>
           {GOOGLE_CLIENT_ID && (
             <>
@@ -217,7 +219,7 @@ export default function LoginPage() {
               {mode === "login" ? "Create an account" : "Sign in"}
             </button>
           </p>
-          <div className="auth-divider">take a look around</div>
+          <div className="auth-divider">or try it first</div>
           <button
             onClick={() => post("/api/auth/demo")}
             disabled={busy}
@@ -227,13 +229,13 @@ export default function LoginPage() {
             Explore the demo
           </button>
           <p className="mt-3 text-center text-xs leading-5 text-gray-500">
-            A sample league, ready to explore. No signup needed.
+            Look around a sample league. No account needed.
           </p>
           <Link
             href="/"
             className="mt-9 block text-center text-xs text-gray-500 hover:text-ink"
           >
-            ← Back to FFAI
+            ← Back to home
           </Link>
         </div>
       </div>

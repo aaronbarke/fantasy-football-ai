@@ -302,8 +302,8 @@ export default function TradePage() {
       >
         <PageHeader
           title="Trade analyzer"
-          description="Weigh what you give, what you get, and how the deal fits your roster."
-          eyebrow="Make your move"
+          description="See what you give, what you get, and how the deal changes your roster."
+          eyebrow="Trades"
         />
 
         <div className="mt-6 rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900/40">

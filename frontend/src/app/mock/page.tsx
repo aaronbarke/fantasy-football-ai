@@ -216,9 +216,9 @@ export default function MockDraftPage() {
           className="mx-auto max-w-6xl px-4 py-8"
         >
           <PageHeader
-            title="Practice your next great draft."
-            description="Try a strategy, make your picks, and see how your roster stacks up against simulated opponents."
-            eyebrow="The practice field"
+            title="Mock draft"
+            description="Try a draft strategy against computer opponents and see how your roster turns out."
+            eyebrow="Practice"
           />
           <div className="mock-setup">
             <div className="rounded-2xl border border-gray-200 bg-white p-7">
@@ -282,17 +282,17 @@ export default function MockDraftPage() {
               {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
             </div>
             <aside className="mock-story stage">
-              <p className="eyebrow">Room to experiment</p>
+              <p className="eyebrow">How it works</p>
               <h2>
-                Find your rhythm.
+                Practice before
                 <br />
-                Before it counts.
+                it counts.
               </h2>
               <PlaybookField />
               <p>
-                Set your league size and draft position. Simulated opponents
-                pick around market rankings, so every round gives you a decision
-                to make.
+                Set your league size and draft spot. Computer opponents draft
+                close to average draft position, so every round feels like a
+                real draft.
               </p>
             </aside>
           </div>

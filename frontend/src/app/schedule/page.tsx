@@ -68,9 +68,9 @@ export default function SchedulePage() {
         className="mx-auto max-w-6xl px-4 py-8"
       >
         <PageHeader
-          title="Look ahead"
-          description="Explore upcoming opponents and spot favorable stretches for your roster."
-          eyebrow="Schedule strength"
+          title="Schedule strength"
+          description="See who your players face next, and which weeks look easy or tough."
+          eyebrow="Look ahead"
         />
 
         <div className="mt-4 inline-flex rounded-lg border border-gray-200 p-0.5 dark:border-gray-800">

@@ -515,13 +515,13 @@ export default function DraftPage() {
       >
         <div className="page-heading">
           <div>
-            <p className="eyebrow">Make every pick count</p>
+            <p className="eyebrow">Draft day</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
               Your draft room.
             </h1>
             <p className="page-description">
-              Find your next pick. Track who’s available, compare value, and
-              build your roster.
+              Rankings for your league, who’s still available, and who to take
+              next.
             </p>
             <p className="mt-3 inline-flex rounded-md border border-gray-200 bg-white px-2 py-0.5 font-mono text-[11px] uppercase text-gray-500">
               {(data?.scoring ?? "ppr").replace("_", "-")} ·{" "}
@@ -781,8 +781,8 @@ export default function DraftPage() {
             )}
             {!isLoading && !boardError && board.length === 0 && (
               <EmptyState
-                title="Your board is warming up"
-                description="Rankings will appear when this season’s draft data is available. Check back before your draft."
+                title="Rankings aren’t ready yet"
+                description="Rankings show up once this season’s draft data is in. Check back before your draft."
               />
             )}
 

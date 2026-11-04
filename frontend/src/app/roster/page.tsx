@@ -48,14 +48,14 @@ export default function RosterPage() {
       >
         <PageHeader
           title="Your roster"
-          description="Your team, player details, and recent form. Select a player to take a closer look."
-          eyebrow="Know your team"
+          description="Your players and their recent form. Select a player for details."
+          eyebrow="Your team"
         />
         {isLoading && <LoadingState label="Loading your roster…" />}
         {error && <ErrorState retry={() => void refetch()} />}
         {!isLoading && !error && !roster && (
           <EmptyState
-            title="Your roster is on its way"
+            title="No roster yet"
             description="Refresh your league from Overview to bring in your players and starters."
             href="/dashboard"
             action="Go to overview"

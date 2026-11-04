@@ -44,11 +44,10 @@ export default function WaiversPage() {
       >
         <div className="page-heading">
           <div>
-            <p className="eyebrow">Find your next addition</p>
+            <p className="eyebrow">Free agents</p>
             <h1>Waiver wire</h1>
             <p className="page-description">
-              Available players in your league. Explore your options before
-              making a move.
+              Players available in your league, with the most-added first.
             </p>
           </div>
           <Link

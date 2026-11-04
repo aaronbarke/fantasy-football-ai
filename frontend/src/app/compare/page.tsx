@@ -129,8 +129,8 @@ export default function ComparePage() {
       >
         <PageHeader
           title="Compare players"
-          description="Put recent production side by side. Find the differences that matter for your next decision."
-          eyebrow="See the whole picture"
+          description="See players’ recent stats side by side."
+          eyebrow="Compare"
         />
 
         <div className="mt-4 flex flex-wrap items-center gap-2">

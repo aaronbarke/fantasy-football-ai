@@ -44,7 +44,7 @@ export default function Brand({
     >
       <BrandMark />
       <span>
-        FFAI<span className="brand-caption">Fantasy football, informed.</span>
+        FFAI<span className="brand-caption">Fantasy football assistant</span>
       </span>
     </Link>
   );
