@@ -43,6 +43,10 @@ class ProjectionSnapshot(Base):
     ceiling: Mapped[float | None] = mapped_column(Float)
     model_proj: Mapped[float | None] = mapped_column(Float)  # our model alone
     external_proj: Mapped[float | None] = mapped_column(Float)  # Sleeper alone
+    # Points the track-record calibration added to ``projected`` (0 or None =
+    # none). Bias is measured on ``projected - calibration_adj`` so the
+    # correction doesn't grade its own output and cancel itself out.
+    calibration_adj: Mapped[float | None] = mapped_column(Float)
     kickoff: Mapped[datetime | None] = mapped_column(DateTime)
     captured_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     actual: Mapped[float | None] = mapped_column(Float)  # filled at grading

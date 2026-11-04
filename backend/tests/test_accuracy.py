@@ -274,3 +274,119 @@ async def test_report_is_empty_before_anything_is_tracked(db: AsyncSession):
     r = await accuracy_report(db, conn)
     assert r["weeks_tracked"] == [] and r["projections"]["overall"] is None
     assert r["lineups"]["totals"] is None
+
+
+# --- calibration (track record → projections) ----------------------------------------
+
+
+def _graded(db, week, pos, n, projected, actual, calibration_adj=None, prefix=None):
+    """n graded snapshots for one position in one week."""
+    for i in range(n):
+        db.add(ProjectionSnapshot(
+            season=SEASON, week=week, player_id=f"{prefix or pos}{week}-{i}", position=pos,
+            scoring="ppr", projected=projected, actual=actual,
+            calibration_adj=calibration_adj, captured_at=_now(), graded_at=_now(),
+        ))
+
+
+async def test_no_calibration_until_two_weeks_are_graded(db: AsyncSession):
+    _graded(db, 5, "RB", 200, 10.0, 12.0)
+    await db.commit()
+    assert await projection_service.position_calibration(db, SEASON) == {}
+
+
+async def test_calibration_is_shrunk_and_capped(db: AsyncSession):
+    for wk in (5, 6):
+        _graded(db, wk, "RB", 50, 10.0, 11.0)    # RBs beat us by 10%, 100 games
+        _graded(db, wk, "WR", 300, 10.0, 5.0)    # WRs scored half, 600 games
+    _graded(db, 6, "RB", 5, 0.0, 9.0, prefix="out")  # ruled out (projected 0): ignored
+    await db.commit()
+    cal = await projection_service.position_calibration(db, SEASON)
+    assert cal["RB"]["observed_pct"] == pytest.approx(0.10)
+    assert cal["RB"]["pct"] == pytest.approx(0.10 * 100 / (100 + 300), abs=1e-4)
+    assert cal["RB"]["games"] == 100 and cal["RB"]["weeks"] == 2
+    assert cal["WR"]["pct"] == -projection_service.CALIBRATION_PCT_CAP
+    assert "QB" not in cal
+
+
+async def test_calibration_uses_only_the_most_recent_weeks(db: AsyncSession):
+    _graded(db, 1, "TE", 400, 10.0, 20.0)        # an old, wild week: outside the window
+    for wk in range(2, 2 + projection_service.CALIBRATION_WINDOW_WEEKS):
+        _graded(db, wk, "TE", 50, 10.0, 10.0)
+    await db.commit()
+    cal = await projection_service.position_calibration(db, SEASON)
+    assert cal["TE"]["observed_pct"] == 0 and cal["TE"]["pct"] == 0
+
+
+async def test_bias_is_measured_before_the_correction(db: AsyncSession):
+    # We nudged RBs up 0.5 and they scored exactly our uncorrected 10.0, so the
+    # raw projections were spot on: no further correction, not a −5% swing back.
+    for wk in (5, 6):
+        _graded(db, wk, "RB", 100, 10.5, 10.0, calibration_adj=0.5)
+    await db.commit()
+    cal = await projection_service.position_calibration(db, SEASON)
+    assert cal["RB"]["observed_pct"] == 0 and cal["RB"]["pct"] == 0
+
+
+def test_calibrate_caps_points_and_skips_zero():
+    cal = {"QB": {"pct": 0.08, "observed_pct": 0.2, "weeks": 4, "games": 900},
+           "RB": {"pct": -0.05, "observed_pct": -0.09, "weeks": 4, "games": 900}}
+    adj, reason = projection_service._calibrate(30.0, "QB", cal)
+    assert adj == projection_service.CALIBRATION_ABS_CAP     # 2.4 capped to 1.5
+    assert reason.startswith("Track record: QBs have scored 20% above")
+    adj, reason = projection_service._calibrate(12.0, "RB", cal)
+    assert adj == -0.6 and "below" in reason
+    assert projection_service._calibrate(0.0, "QB", cal) == (0.0, None)
+    assert projection_service._calibrate(12.0, "TE", cal) == (0.0, None)
+
+
+async def test_projections_apply_calibration_and_snapshots_record_it(db: AsyncSession):
+    now = _now()
+    conn = await _league(db, early_kick=now + timedelta(hours=2), late_kick=now + timedelta(hours=5))
+    before = await projection_service.compute_projections(db, ["rb1", "qb"], SEASON)
+
+    for wk in (5, 6):
+        _graded(db, wk, "RB", 300, 10.0, 8.0)    # RBs ran 20% high → capped at −8%
+    await db.commit()
+    after = await projection_service.compute_projections(db, ["rb1", "qb"], SEASON)
+
+    adj = after["rb1"]["components"]["calibration_adj"]
+    expected = round(max(-1.5, before["rb1"]["projected"] * -0.08), 1)
+    assert adj == expected and adj < 0
+    assert after["rb1"]["projected"] == pytest.approx(before["rb1"]["projected"] + adj, abs=0.11)
+    assert "RBs have scored 20% below" in after["rb1"]["calibration_reason"]
+    assert after["qb"]["components"]["calibration_adj"] == 0.0      # no QB history
+    assert after["qb"]["projected"] == before["qb"]["projected"]
+
+    await snapshot_week(db, now=now)
+    snap = (await db.execute(
+        select(ProjectionSnapshot).where(ProjectionSnapshot.player_id == "rb1")
+    )).scalar_one()
+    assert snap.calibration_adj == adj
+
+    # The report shows the calibration in force and, once graded, its effect.
+    snap.actual = snap.projected - adj        # he scored our uncorrected number
+    snap.graded_at = now
+    await db.commit()
+    r = await accuracy_report(db, conn)
+    c = r["projections"]["calibration"]
+    assert c["by_position"]["RB"]["pct"] == -0.08
+    assert c["count"] == 1
+    assert c["with"] == pytest.approx(abs(adj)) and c["without"] == 0
+
+
+async def test_boot_adds_the_calibration_column_to_an_old_table():
+    from sqlalchemy import inspect, text
+
+    from app.database import add_missing_columns
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE TABLE projection_snapshots (id INTEGER PRIMARY KEY)"))
+        assert await conn.run_sync(add_missing_columns) == ["projection_snapshots.calibration_adj"]
+        assert await conn.run_sync(add_missing_columns) == []       # idempotent
+        cols = await conn.run_sync(
+            lambda c: {col["name"] for col in inspect(c).get_columns("projection_snapshots")}
+        )
+    await engine.dispose()
+    assert "calibration_adj" in cols

@@ -22,13 +22,17 @@ out — project to exactly 0 so no lineup or live total counts them.
 How a skill player's number is put together:
 
     model     = base + matchup + vegas + weather + teammates_out + qb_change
-    projected = s * sleeper + (1 - s) * model + opposing_defense_injuries
+    blended   = s * sleeper + (1 - s) * model + opposing_defense_injuries
+    projected = blended + calibration
 
 where ``s`` is Sleeper's share (0.5 early in the week, ramping to 0.7 at
 kickoff). Teammate absences and a backup QB starting live inside ``model``
 because Sleeper's weekly number already reflects that news — adding them on
-top of the blend would count it twice. Every term is returned in
-``components`` so the UI can show the math.
+top of the blend would count it twice. ``calibration`` is the track-record
+correction: if a position's projections have run high or low over the last
+few graded weeks, nudge it back by a shrunk, capped share (see
+``position_calibration``). Every term is returned in ``components`` so the UI
+can show the math.
 """
 
 import math
@@ -38,7 +42,14 @@ from datetime import datetime, timezone
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DepthChartEntry, GameCondition, NflSchedule, Player, PlayerStatsWeekly
+from app.models import (
+    DepthChartEntry,
+    GameCondition,
+    NflSchedule,
+    Player,
+    PlayerStatsWeekly,
+    ProjectionSnapshot,
+)
 from app.services.defense_impact_service import defense_injury_pct
 from app.services.external_proj_service import get_external_passing, get_external_projections
 from app.services.opportunity_service import (
@@ -123,6 +134,103 @@ QB_CHANGE_CAP = 0.15
 QB_CHANGE_DEFAULT = 0.08  # when the drop can't be sized (no backup projection)
 QB_CHANGE_POSITION_WEIGHT = {"WR": 1.0, "TE": 1.0, "RB": 0.4}
 QB_START_PASS_YARDS = 100  # a game with this many passing yards counts as a start
+
+
+# Track-record calibration. After each graded week we know how far each
+# position's projections ran from what players actually scored. If RBs have
+# been scoring 5% under our numbers, new RB projections come down a little.
+# Deliberately modest: recent weeks only, shrunk toward zero when the sample is
+# small, and capped so one odd week can't swing a lineup.
+CALIBRATION_WINDOW_WEEKS = 6   # use the most recent graded weeks only
+CALIBRATION_MIN_WEEKS = 2      # fewer graded weeks than this → no correction
+CALIBRATION_SHRINK_GAMES = 300  # weight on the observed bias = n / (n + this)
+CALIBRATION_PCT_CAP = 0.08     # at most ±8% of a projection...
+CALIBRATION_ABS_CAP = 1.5      # ...and at most ±1.5 points for any one player
+CALIBRATED_POSITIONS = ("QB", "RB", "WR", "TE")  # what the track record grades
+
+
+async def position_calibration(
+    db: AsyncSession, season: int, scoring: str = "ppr"
+) -> dict[str, dict]:
+    """position → how much to scale new projections, from graded snapshots.
+
+    Bias is measured on each snapshot's projection *before* the calibration
+    that was applied to it (``projected - calibration_adj``) — measuring on
+    the corrected number would make the correction cancel itself out the
+    next week. Players projected 0 (already ruled out) aren't counted, same
+    as on the Track record page.
+    """
+    weeks = (
+        await db.execute(
+            select(ProjectionSnapshot.week)
+            .where(
+                ProjectionSnapshot.season == season,
+                ProjectionSnapshot.scoring == scoring,
+                ProjectionSnapshot.actual.is_not(None),
+            )
+            .distinct()
+            .order_by(ProjectionSnapshot.week.desc())
+            .limit(CALIBRATION_WINDOW_WEEKS)
+        )
+    ).scalars().all()
+    if len(weeks) < CALIBRATION_MIN_WEEKS:
+        return {}
+
+    raw = ProjectionSnapshot.projected - func.coalesce(ProjectionSnapshot.calibration_adj, 0.0)
+    rows = (
+        await db.execute(
+            select(
+                ProjectionSnapshot.position,
+                func.count(),
+                func.sum(ProjectionSnapshot.actual),
+                func.sum(raw),
+            )
+            .where(
+                ProjectionSnapshot.season == season,
+                ProjectionSnapshot.scoring == scoring,
+                ProjectionSnapshot.week.in_(weeks),
+                ProjectionSnapshot.actual.is_not(None),
+                ProjectionSnapshot.projected > 0,
+                ProjectionSnapshot.position.in_(CALIBRATED_POSITIONS),
+            )
+            .group_by(ProjectionSnapshot.position)
+        )
+    ).all()
+
+    out: dict[str, dict] = {}
+    for position, games, actual_sum, projected_sum in rows:
+        if not games or not projected_sum or projected_sum <= 0:
+            continue
+        observed = (actual_sum - projected_sum) / projected_sum
+        pct = observed * games / (games + CALIBRATION_SHRINK_GAMES)
+        pct = max(-CALIBRATION_PCT_CAP, min(CALIBRATION_PCT_CAP, pct))
+        out[position] = {
+            "pct": round(pct, 4),
+            "observed_pct": round(observed, 4),
+            "games": games,
+            "weeks": len(weeks),
+        }
+    return out
+
+
+def _calibrate(
+    projected: float, position: str | None, calibration: dict[str, dict]
+) -> tuple[float, str | None]:
+    """(points to add, plain-language reason) for one player's projection."""
+    cal = calibration.get(position or "")
+    if not cal or projected <= 0 or not cal["pct"]:
+        return 0.0, None
+    adj = max(-CALIBRATION_ABS_CAP, min(CALIBRATION_ABS_CAP, projected * cal["pct"]))
+    adj = round(adj, 1)
+    if adj == 0:
+        return 0.0, None
+    observed = cal["observed_pct"]
+    reason = (
+        f"Track record: {position}s have scored {abs(observed) * 100:.0f}% "
+        f"{'above' if observed > 0 else 'below'} our projections over the last "
+        f"{cal['weeks']} weeks, so {'+' if adj > 0 else '−'}{abs(adj):.1f}"
+    )
+    return adj, reason
 
 
 def sleeper_blend_weight(now: datetime | None, kickoff: datetime | None) -> float:
@@ -594,6 +702,7 @@ async def compute_projections(
     team_form = (
         await _team_form(db, season) if (dst_players or kickers) else {}
     )
+    calibration = await position_calibration(db, season, scoring) if players else {}
 
     out: dict[str, dict] = {}
     for p in players:
@@ -618,11 +727,15 @@ async def compute_projections(
             # his team's projected total silently loses his points.
             if ext is None:
                 continue
-            projected = max(0.0, float(ext))
+            calibration_adj, calibration_reason = _calibrate(
+                max(0.0, float(ext)), p.position, calibration
+            )
+            projected = max(0.0, float(ext) + calibration_adj)
             sigma = max(projected * THIN_SAMPLE_CV, 1.0)
             confidence = "low"
             if _is_absent(p.injury_status):
                 projected, sigma, confidence = 0.0, 0.0, "high"
+                calibration_adj, calibration_reason = 0.0, None
             thin_base = (
                 sum(pts for pts, _ in samples) / len(samples) if samples else None
             )
@@ -637,6 +750,7 @@ async def compute_projections(
                 "boost_reason": None,
                 "qb_reason": None,
                 "defense_reason": None,
+                "calibration_reason": calibration_reason,
                 "components": {
                     "base_ppg": round(thin_base, 1) if thin_base is not None else None,
                     "matchup_adj": 0.0,
@@ -648,6 +762,7 @@ async def compute_projections(
                     "defense_injury_adj": 0.0,
                     "external_proj": round(float(ext), 1),
                     "blend_weight": 1.0,
+                    "calibration_adj": calibration_adj,
                     "opponent": game["opponent"] if game else None,
                     "week": game["week"] if game else None,
                     "home": game["home"] if game else None,
@@ -747,6 +862,11 @@ async def compute_projections(
         if defense_injury_adj:
             projected = max(0.0, projected + defense_injury_adj)
 
+        # Track-record calibration, on the finished number (so it corrects the
+        # blend as a whole, Sleeper's share included).
+        calibration_adj, calibration_reason = _calibrate(projected, p.position, calibration)
+        projected = max(0.0, projected + calibration_adj)
+
         games_played = len(samples)
         cv = sigma / base if base > 0 else 1.0
         confidence = (
@@ -761,6 +881,7 @@ async def compute_projections(
             projected = 0.0
             sigma = 0.0
             confidence = "high"  # he's out — that part isn't uncertain
+            calibration_adj, calibration_reason = 0.0, None
 
         out[p.id] = {
             "projected": round(projected, 1),
@@ -773,6 +894,7 @@ async def compute_projections(
             "boost_reason": boost_reason,
             "qb_reason": qb_reason,
             "defense_reason": defense_reason,
+            "calibration_reason": calibration_reason,
             "components": {
                 # Our model's terms (they sum to model_proj)...
                 "base_label": "Recent-weighted average",
@@ -798,6 +920,8 @@ async def compute_projections(
                 "external_proj": round(ext, 1) if ext is not None else None,
                 "blend_weight": round(blend_weight, 2) if blend_weight is not None else None,
                 "defense_injury_adj": defense_injury_adj,
+                # ...then the track-record calibration.
+                "calibration_adj": calibration_adj,
                 "opponent": opponent,
                 "week": game["week"] if game else None,
                 "home": game["home"] if game else None,

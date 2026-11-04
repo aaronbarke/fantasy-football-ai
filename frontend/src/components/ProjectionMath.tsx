@@ -5,6 +5,7 @@
  *
  *   model     = base + matchup + vegas + weather + teammates out + QB change
  *   projected = s * Sleeper + (1 - s) * model + opposing D injuries
+ *               + track-record calibration
  */
 
 export interface ProjectionTerm {
@@ -31,6 +32,10 @@ export interface ProjectionBreakdown {
   external_proj?: number | null;
   blend_weight?: number | null;
   defense_injury_adj?: number | null;
+  // Track-record correction: + when this position has been scoring above our
+  // projections lately, − when below.
+  calibration_adj?: number | null;
+  calibration_reason?: string | null;
   boost_reason?: string | null;
   qb_reason?: string | null;
   defense_reason?: string | null;
@@ -70,7 +75,7 @@ export default function ProjectionMath({
   }
   const hasModel = p.model_proj != null && p.base_ppg != null;
   const hasSleeper = p.external_proj != null;
-  const notes = [p.boost_reason, p.qb_reason, p.defense_reason].filter(
+  const notes = [p.boost_reason, p.qb_reason, p.defense_reason, p.calibration_reason].filter(
     (n): n is string => !!n,
   );
   if (!hasModel && !hasSleeper && notes.length === 0) return null;
@@ -86,6 +91,10 @@ export default function ProjectionMath({
       ];
   const s = p.blend_weight ?? (hasModel ? 0 : 1);
   const defense = p.defense_injury_adj ?? 0;
+  const calibration = p.calibration_adj ?? 0;
+  const extras =
+    (Math.abs(defense) >= 0.05 ? `, ${signed(defense)} opposing D injuries` : "") +
+    (Math.abs(calibration) >= 0.05 ? `, ${signed(calibration)} track record` : "");
 
   return (
     <details className="group mt-2 text-xs">
@@ -123,13 +132,14 @@ export default function ProjectionMath({
         <div className="border-t border-gray-200 pt-1 dark:border-gray-700">
           {hasModel && hasSleeper
             ? `Blend: ${Math.round(s * 100)}% Sleeper + ${Math.round((1 - s) * 100)}% our model` +
-              (Math.abs(defense) >= 0.05 ? `, ${signed(defense)} opposing D injuries` : "") +
+              extras +
               ` = ${p.projected}`
             : hasSleeper
-              ? `Too little history for our model, so this is Sleeper's number.`
-              : `No Sleeper projection, so this is our model` +
-                (Math.abs(defense) >= 0.05 ? ` ${signed(defense)} opposing D injuries` : "") +
-                "."}
+              ? `Too little history for our model, so this is Sleeper's number` +
+                (Math.abs(calibration) >= 0.05
+                  ? `, ${signed(calibration)} track record = ${p.projected}.`
+                  : ".")
+              : `No Sleeper projection, so this is our model` + extras + "."}
         </div>
         )}
         {notes.map((n) => (

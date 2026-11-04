@@ -43,7 +43,7 @@ from app.models import (
 )
 from app.services.external_proj_service import get_external_projections
 from app.services.gameplan_service import build_gameplan, optimize_lineup
-from app.services.projection_service import compute_projections
+from app.services.projection_service import compute_projections, position_calibration
 from app.services.schedule_service import current_nfl_week, points_column, utc_now
 
 logger = logging.getLogger(__name__)
@@ -160,6 +160,7 @@ async def snapshot_week(db: AsyncSession, now: datetime | None = None) -> dict:
             snap.ceiling = pkg.get("ceiling")
             snap.model_proj = c.get("model_proj")
             snap.external_proj = c.get("external_proj")
+            snap.calibration_adj = c.get("calibration_adj")
             snap.kickoff = kickoff
             snap.captured_at = now
             saved += 1
@@ -474,6 +475,15 @@ async def accuracy_report(db: AsyncSession, conn: LeagueConnection) -> dict:
         "sleeper_only": _mae([(s.external_proj, s.actual) for s in with_sleeper]),
         "our_model_only": _mae([(s.model_proj, s.actual) for s in with_model if s.external_proj is not None]),
     }
+    # The calibration in force now, and whether it has helped: average miss of
+    # the calibrated projections vs the same projections without it.
+    calibrated = [s for s in graded if s.calibration_adj]
+    calibration = {
+        "by_position": await position_calibration(db, season, scoring),
+        "count": len(calibrated),
+        "with": _mae([(s.projected, s.actual) for s in calibrated]),
+        "without": _mae([(s.projected - s.calibration_adj, s.actual) for s in calibrated]),
+    }
     by_week = [
         {"week": w, **(_error_stats(rows([s for s in graded if s.week == w])) or {})}
         for w in sorted({s.week for s in graded})
@@ -654,6 +664,7 @@ async def accuracy_report(db: AsyncSession, conn: LeagueConnection) -> dict:
             "overall": _error_stats(rows(graded)),
             "by_position": by_position,
             "vs_sleeper": comparison,
+            "calibration": calibration,
             "by_week": by_week,
             "your_players": your_players[:30],
             "biggest_misses": biggest_misses,

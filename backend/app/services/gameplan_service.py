@@ -157,6 +157,8 @@ async def _player_cards(
                 "qb_reason": proj.get("qb_reason"),
                 "defense_injury_adj": (proj.get("components") or {}).get("defense_injury_adj"),
                 "defense_reason": proj.get("defense_reason"),
+                "calibration_adj": (proj.get("components") or {}).get("calibration_adj"),
+                "calibration_reason": proj.get("calibration_reason"),
                 "external_proj": (proj.get("components") or {}).get("external_proj"),
                 # The rest of the math, so the UI can show how the number was built.
                 "base_ppg": (proj.get("components") or {}).get("base_ppg"),
