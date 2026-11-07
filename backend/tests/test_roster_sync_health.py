@@ -139,3 +139,35 @@ async def test_reconnect_replaces_expired_espn_cookies(db, monkeypatch):
     assert synced == [{"espn_s2": "new", "swid": NEW_SWID}]
     rows = (await db.execute(select(LeagueConnection))).scalars().all()
     assert len(rows) == 1
+
+
+# --- the ESPN league's own IR flag --------------------------------------------
+
+
+async def test_espn_league_ir_flag_marks_player_absent(db):
+    def entry(espn_id, status):
+        return {
+            "playerId": int(espn_id),
+            "playerPoolEntry": {"player": {"fullName": espn_id, "injuryStatus": status}},
+        }
+
+    teams = [{"id": 3, "roster": {"entries": [
+        entry("16800", "INJURY_RESERVE"),  # on IR, missing from the injury feed
+        entry("200", "QUESTIONABLE"),     # game-day status: left to the feed
+        entry("300", "SUSPENSION"),
+        entry("400", "INJURY_RESERVE"),   # already flagged by Sleeper
+    ]}}]
+    db.add_all([
+        Player(id="adams", full_name="Davante Adams", position="WR"),
+        Player(id="q", full_name="Q", position="WR"),
+        Player(id="s", full_name="S", position="WR"),
+        Player(id="ir", full_name="IR", position="WR", injury_status="Injured Reserve"),
+    ])
+    await db.commit()
+
+    espn_map = {"16800": "adams", "200": "q", "300": "s", "400": "ir"}
+    await sync_service._stamp_league_long_term_statuses(db, teams, espn_map)
+    await db.commit()
+
+    status = {p.id: p.injury_status for p in (await db.execute(select(Player))).scalars()}
+    assert status == {"adams": "IR", "q": None, "s": "Sus", "ir": "Injured Reserve"}

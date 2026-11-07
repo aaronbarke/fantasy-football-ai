@@ -463,6 +463,39 @@ def _espn_player_points(side: dict, espn_map: dict[str, str]) -> dict[str, float
     return out
 
 
+# ESPN fantasy player ``injuryStatus`` → our status vocabulary, for the
+# designations that last weeks. Game-day statuses (Out / Questionable) are
+# left to the injury feed, which refreshes them through the week.
+_ESPN_LONG_TERM_STATUS = {"INJURY_RESERVE": "IR", "SUSPENSION": "Sus"}
+
+
+async def _stamp_league_long_term_statuses(
+    db: AsyncSession, teams: list[dict], espn_map: dict[str, str]
+) -> None:
+    """Flag rostered players the league itself has on IR or suspended.
+
+    ESPN's public injury feed drops some long-term IR players entirely, and
+    Sleeper's IR flag only lands with the once-a-day player sync, so a player
+    like that projected as healthy and was suggested as a starter. The
+    league's own roster data says IR on every sync — trust it. The injury sync
+    keeps these, and the daily Sleeper sync clears them once he's activated."""
+    flagged: dict[str, str] = {}
+    for team in teams:
+        for espn_id, player in _roster_players(team):
+            status = _ESPN_LONG_TERM_STATUS.get(str(player.get("injuryStatus") or "").upper())
+            pid = espn_map.get(espn_id)
+            if status and pid:
+                flagged[pid] = status
+    if not flagged:
+        return
+    rows = (
+        await db.execute(select(Player).where(Player.id.in_(list(flagged))))
+    ).scalars().all()
+    for p in rows:
+        if not is_long_term_absent(p.injury_status):
+            p.injury_status = flagged[p.id]
+
+
 async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
     creds = open_credentials(conn.credentials)
     if creds and not is_sealed(conn.credentials):
@@ -505,6 +538,8 @@ async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
             if swid in owners:
                 conn.team_id = str(team["id"])
                 break
+
+    await _stamp_league_long_term_statuses(db, data.get("teams", []), espn_map)
 
     for team in data.get("teams", []):
         team_id = str(team["id"])
