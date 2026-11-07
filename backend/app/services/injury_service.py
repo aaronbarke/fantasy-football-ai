@@ -19,6 +19,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DepthChartEntry, InjuryEvent, Player
+from app.services.opportunity_service import is_long_term_absent
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +112,23 @@ async def sync_injuries(db: AsyncSession) -> list[InjuryEvent]:
     ).all()
     before = {espn_id: (pid, status) for pid, espn_id, status in before_rows}
 
-    # Clear stale statuses first so recoveries show as healthy
-    await db.execute(update(Player).values(injury_status=None, injury_body_part=None))
+    # Clear stale statuses first so recoveries show as healthy — except IR /
+    # PUP / NFI / suspension. ESPN's feed often drops players who have sat on
+    # IR for weeks, and those designations come from Sleeper's daily player
+    # sync (which also clears them on activation). Wiping them here made a
+    # season-ending IR player look healthy, so the game plan started him.
+    flagged = (
+        await db.execute(
+            select(Player.id, Player.injury_status).where(Player.injury_status.is_not(None))
+        )
+    ).all()
+    to_clear = [pid for pid, status in flagged if not is_long_term_absent(status)]
+    for i in range(0, len(to_clear), 500):
+        await db.execute(
+            update(Player)
+            .where(Player.id.in_(to_clear[i : i + 500]))
+            .values(injury_status=None, injury_body_part=None)
+        )
     # Same for the depth-chart snapshot (offense alignment + defenders), which
     # feeds the opponent defensive-injury adjustment.
     await db.execute(update(DepthChartEntry).values(injury_status=None))

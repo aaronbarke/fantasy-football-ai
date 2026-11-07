@@ -220,7 +220,9 @@ export default function ConnectPage() {
                 <p className="mt-3 text-xs leading-6 text-gray-500">
                   Private leagues need your ESPN session cookies. While signed
                   into ESPN, open your browser’s developer tools and look under
-                  Application → Cookies for espn_s2 and SWID.
+                  Application → Cookies for espn_s2 and SWID. Already
+                  connected and the league stopped updating? Enter the league
+                  again with fresh cookies to replace the old ones.
                 </p>
                 <label className="field-label mt-4" htmlFor="espn-cookie">
                   espn_s2
