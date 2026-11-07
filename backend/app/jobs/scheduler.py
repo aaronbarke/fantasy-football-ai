@@ -171,12 +171,22 @@ async def job_refresh_odds() -> None:
 
 async def job_sync_all_leagues() -> None:
     async with SessionLocal() as db:
-        conns = (await db.execute(select(LeagueConnection))).scalars().all()
-        for conn in conns:
+        conn_ids = (await db.execute(select(LeagueConnection.id))).scalars().all()
+    # One session per league: a failed sync must be rolled back on its own.
+    # Sharing one session let a half-applied failure (matchups deleted, rosters
+    # untouched) ride along with the next league's commit, and a database error
+    # left the session unusable, so every league after it silently failed too.
+    for conn_id in conn_ids:
+        async with SessionLocal() as db:
+            conn = await db.get(LeagueConnection, conn_id)
+            if conn is None:
+                continue
+            platform, league_id = conn.platform, conn.league_id
             try:
                 await sync_league(db, conn)
             except Exception:
-                logger.exception("League sync failed for %s", conn.league_id)
+                await db.rollback()
+                logger.exception("League sync failed for %s league %s", platform, league_id)
 
 
 async def job_refresh_schedule() -> None:

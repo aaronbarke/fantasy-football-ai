@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import InjuryBadge from "@/components/InjuryBadge";
 import PlayerAvatar from "@/components/PlayerAvatar";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import type { Matchup, Roster, StandingsEntry } from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
 import { formatRecord, positionColor, timeAgo } from "@/lib/utils";
@@ -87,10 +87,18 @@ function Stat({
   );
 }
 
+/** League sync runs every 2 hours; older than 6 means it's been failing. */
+function syncIsStale(iso: string): boolean {
+  const norm = /[Z]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`;
+  const then = new Date(norm).getTime();
+  return !Number.isNaN(then) && Date.now() - then > 6 * 60 * 60 * 1000;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { league } = useLeague();
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<{ message: string; reconnect: boolean } | null>(null);
   const [refreshingStats, setRefreshingStats] = useState(false);
 
   const { data: roster, isLoading: rosterLoading } = useQuery({
@@ -151,9 +159,17 @@ export default function DashboardPage() {
   async function syncNow() {
     if (!league) return;
     setSyncing(true);
+    setSyncError(null);
     try {
       await api(`/api/leagues/${league.id}/sync`, { method: "POST" });
       window.location.reload();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Couldn't refresh the league.";
+      setSyncError({
+        message,
+        // ESPN private leagues: expired cookies are fixed by reconnecting.
+        reconnect: league.platform === "espn" && /refused access|cookies/i.test(message),
+      });
     } finally {
       setSyncing(false);
     }
@@ -223,8 +239,24 @@ export default function DashboardPage() {
             </div>
             {league?.last_synced_at && (
               <p className="flex items-center gap-1.5 text-xs text-gray-400 sm:justify-end">
-                <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${syncIsStale(league.last_synced_at) ? "bg-amber-500" : "bg-green-500"}`}
+                />
                 Synced {timeAgo(league.last_synced_at)}
+                {syncIsStale(league.last_synced_at) && " — trades and pickups may be missing"}
+              </p>
+            )}
+            {syncError && (
+              <p role="alert" className="max-w-xs text-xs text-red-600 dark:text-red-400 sm:text-right">
+                {syncError.message}
+                {syncError.reconnect && (
+                  <>
+                    {" "}
+                    <Link href="/connect" className="font-semibold underline">
+                      Re-enter your ESPN cookies
+                    </Link>
+                  </>
+                )}
               </p>
             )}
           </div>

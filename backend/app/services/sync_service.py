@@ -25,6 +25,7 @@ from app.services.espn_service import (
     roster_positions_from_espn,
     scoring_type_from_espn,
 )
+from app.services.opportunity_service import is_long_term_absent
 from app.services.schedule_service import ensure_schedule
 from app.services.sleeper_service import SleeperClient
 from app.utils.constants import FANTASY_POSITIONS
@@ -96,8 +97,14 @@ async def sync_player_pool(db: AsyncSession) -> int:
         player.age = p.get("age")
         player.years_exp = p.get("years_exp")
         player.status = p.get("status")
-        player.injury_status = p.get("injury_status") or player.injury_status
-        player.injury_body_part = p.get("injury_body_part") or player.injury_body_part
+        if p.get("injury_status"):
+            player.injury_status = p["injury_status"]
+            player.injury_body_part = p.get("injury_body_part") or player.injury_body_part
+        elif is_long_term_absent(player.injury_status):
+            # Sleeper no longer lists him on IR/PUP/suspension — he's been
+            # activated. (Game-day statuses are left to the ESPN injury sync.)
+            player.injury_status = None
+            player.injury_body_part = None
         player.depth_chart_order = p.get("depth_chart_order")
         if p.get("espn_id"):
             player.espn_id = str(p["espn_id"])

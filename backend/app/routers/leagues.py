@@ -142,6 +142,19 @@ async def connect_league(
             )
         )
     ).scalar_one_or_none()
+    if existing and body.platform == "espn" and body.espn_s2 and body.swid:
+        # Reconnecting a private ESPN league with fresh cookies: the old ones
+        # expired (or can no longer be decrypted), so every sync was failing.
+        # Swap them in and re-sync rather than forcing a disconnect, which
+        # would throw away the league's history.
+        existing.credentials = seal_credentials({"espn_s2": body.espn_s2, "swid": body.swid})
+        try:
+            await sync_league(db, existing)
+        except Exception as exc:
+            failure = _sync_failure(existing, exc)  # before rollback expires conn
+            await db.rollback()
+            raise failure from exc
+        return _conn_response(existing)
     if existing:
         raise HTTPException(status.HTTP_409_CONFLICT, "League already connected")
 
