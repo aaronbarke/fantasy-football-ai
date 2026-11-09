@@ -363,3 +363,102 @@ async def test_snapshots_keep_projections_for_news(db):
     snap = (await db.execute(select(MatchupOdds))).scalars().one()
     assert set(snap.player_proj) == {"gibbs", "jacobs"}
     assert snap.player_proj["gibbs"]["proj"] > 0
+
+
+# ── Per-play swings, ESPN-id matching, unexplained point jumps ─────────────
+
+
+def test_three_point_moves_are_swings_and_each_play_stands_alone():
+    from app.services.odds_timeline import SWING_THRESHOLD
+
+    assert SWING_THRESHOLD == 0.03
+    starters = [
+        _starter("Brock Purdy", "user", "SF", points=10.2, proj=18.0, sd=8.0, pos="QB"),
+        _starter("Jahmyr Gibbs", "opp", "SF", points=0.0, proj=0.0, sd=0.0, pos="RB"),
+        _starter("Puka Nacua", "opp", "LAR", points=0.0, proj=17.0, sd=7.0, pos="WR"),
+    ]
+    sf = _game(K, [
+        _play(K + timedelta(minutes=30), "Passing Touchdown",
+              "B.Purdy pass deep left to G.Kittle for 32 yards, TOUCHDOWN.", 32, 1, 300),
+        # The next snap, 40 seconds later: a separate moment, not merged in.
+        _play(K + timedelta(minutes=30, seconds=40), "Rush",
+              "B.Purdy scrambles right end for 12 yards.", 12, 1, 260),
+    ], final=False)
+    lar = _game(K + timedelta(hours=3), None, final=False)
+    out = rebuild_timeline(starters, {"SF": sf, "LAR": lar}, [K], K + timedelta(minutes=60))
+    moments = [p for p in out["points"] if p.get("events")]
+    assert [m["events"][0]["label"] for m in moments] == ["32-yd TD pass", "12-yd run"]
+    td = moments[0]
+    assert 0.03 <= td["swing"]["delta"]
+    assert td["swing"]["drivers"][0]["name"] == "Brock Purdy"
+
+
+def test_unexplained_point_jump_names_the_player():
+    """ESPN plays unavailable, but the live job saw Gibbs go 2.0 → 10.4."""
+    starters = [
+        _starter("Jahmyr Gibbs", "user", "DET", points=10.4, proj=15.0, sd=6.0),
+        _starter("Puka Nacua", "opp", "LAR", points=0.0, proj=15.0, sd=6.0),
+    ]
+    games = {"DET": _game(K, None, final=False), "LAR": _game(K + timedelta(hours=3), None, final=False)}
+    seen = {"Jahmyr Gibbs": [(K + timedelta(minutes=20), 2.0), (K + timedelta(minutes=50), 10.4)]}
+    out = rebuild_timeline(starters, games, [K], K + timedelta(minutes=60), points_history=seen)
+    jump = next(p for p in out["points"] if p["t"] == (K + timedelta(minutes=50)).isoformat())
+    [e] = jump["events"]
+    assert e["kind"] == "points" and e["name"] == "Jahmyr Gibbs" and e["label"] == "+8.4 pts"
+    assert jump["swing"]["drivers"][0]["label"] == "+8.4 pts"
+    # The rest of his points still add up: he ends at his real total.
+    assert out["points"][-1]["user_points"] == 10.4
+
+
+def test_jump_explained_by_a_matched_play_is_not_double_counted():
+    starters = [_starter("Jahmyr Gibbs", "user", "DET", points=10.5, proj=15.0, sd=6.0)]
+    det = _game(K, [_play(K + timedelta(minutes=40), "Rushing Touchdown",
+                          "J.Gibbs left end for 45 yards, TOUCHDOWN.", 45, 2, 600)], final=False)
+    seen = {"Jahmyr Gibbs": [(K + timedelta(minutes=39), 0.0), (K + timedelta(minutes=41), 10.5)]}
+    out = rebuild_timeline(starters, {"DET": det}, [K], K + timedelta(minutes=60), points_history=seen)
+    labels = [e["label"] for p in out["points"] for e in p.get("events") or []]
+    assert labels == ["45-yd TD run"]
+
+
+def test_match_name_finds_a_player_stored_under_another_name():
+    """Our feed says "Hollywood Brown"; ESPN's plays say "M.Brown"."""
+    s = _starter("Hollywood Brown", "user", "KC", points=9.0, proj=10.0, sd=5.0, pos="WR")
+    s["match_name"] = "Marquise Brown"
+    kc = _game(K, [_play(K + timedelta(minutes=10), "Pass Reception",
+                         "P.Mahomes pass deep right to M.Brown to KC 40 for 30 yards.", 30, 1, 400)],
+               final=False)
+    out = rebuild_timeline([s], {"KC": kc}, [K], K + timedelta(minutes=30))
+    ev = next(p for p in out["points"] if p.get("events"))["events"][0]
+    assert ev["name"] == "Hollywood Brown" and ev["label"] == "30-yd catch"
+
+
+def test_parse_athletes_reads_espn_ids_from_the_box_score():
+    from app.services.nfl_plays_service import parse_athletes
+
+    summary = {"boxscore": {"players": [{"team": {"abbreviation": "WSH"}, "statistics": [
+        {"athletes": [{"athlete": {"id": "4429795", "firstName": "Jahmyr", "lastName": "Gibbs",
+                                   "displayName": "Jahmyr Gibbs"}}]},
+    ]}]}}
+    assert parse_athletes(summary) == {"4429795": {"name": "Jahmyr Gibbs", "team": "WAS"}}
+
+
+async def test_rebuild_matches_players_through_espn_ids(db, monkeypatch):
+    kickoff = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0) - timedelta(hours=1)
+    conn = await _league(db, kickoff)
+    gibbs = await db.get(Player, "gibbs")
+    gibbs.full_name = "Sonic Gibbs"  # a nickname "S.Gibbs" would never match…
+    gibbs.espn_id = "4429795"
+    await db.commit()
+    scoreboard, summary = _espn(kickoff)
+    summary["drives"]["previous"][0]["plays"][1]["text"] = "J.Gibbs left end for 45 yards, TOUCHDOWN."
+    summary["boxscore"] = {"players": [{"team": {"abbreviation": "DET"}, "statistics": [{"athletes": [
+        {"athlete": {"id": "4429795", "firstName": "Jahmyr", "lastName": "Gibbs"}}]}]}]}
+
+    async def fake_fetch(url, params):
+        return summary if "summary" in url else scoreboard
+
+    monkeypatch.setattr(nfl_plays_service, "_fetch_json", fake_fetch)
+    out = await rebuild_odds_history(db, conn)
+    ev = next(p for p in out["points"] if p.get("events") and p["events"][0]["side"] == "user")["events"][0]
+    # …but his ESPN id finds him as "J.Gibbs".
+    assert ev["label"] == "45-yd TD run" and ev["name"] == "Sonic Gibbs"

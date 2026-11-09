@@ -29,9 +29,14 @@ from app.services.projection_service import win_probability
 # assumed to run this long, its remaining share falling linearly.
 GAME_MINUTES = 190.0
 SAMPLE_EVERY = timedelta(minutes=5)
-# Plays this close together count as one moment (a TD and the next kickoff,
-# or two games scoring in the same minute).
-CLUSTER_GAP = timedelta(seconds=90)
+# Plays this close together count as one moment (two games scoring in the
+# same few seconds). Plays in one game are at least a snap apart, so each
+# play is its own swing.
+CLUSTER_GAP = timedelta(seconds=20)
+# A recorded jump in a starter's live points that his matched plays don't
+# explain (a play we couldn't read, a stat correction) is named on its own
+# ("Gibbs +8.4 pts") once it's at least this big.
+UNEXPLAINED_MIN = 1.0
 # A projection move smaller than this between snapshots is noise, not news.
 NEWS_MIN_PROJ = 0.5
 GAME_WINDOW = timedelta(hours=4)
@@ -297,14 +302,20 @@ def rebuild_timeline(
     scoring: str = "ppr",
     proj_history: dict[str, list] | None = None,
     threshold: float = SWING_THRESHOLD,
+    points_history: dict[str, list] | None = None,
 ) -> dict:
     """The win-probability curve from the first kickoff to ``now``.
 
     ``starters_info``: both teams' starters ({id, name, position, team, side,
     points, projected, stdev, injury_status}). ``games``: team → {kickoff,
     plays (or None), final}. ``proj_history``: player → [(time, proj, sd,
-    status)] from recorded snapshots."""
+    status)] from recorded snapshots. ``points_history``: player → [(time,
+    live points)] from recorded snapshots — where a jump isn't explained by
+    a matched play, it becomes its own event at the time it was seen.
+    A starter's ``match_name`` (ESPN's spelling, via his ESPN id) is used to
+    find him in play text, falling back to ``name``."""
     proj_history = proj_history or {}
+    points_history = points_history or {}
     game_objs: dict[str, _Game] = {}
     by_team_game: dict[int, _Game] = {}
     for team, g in games.items():
@@ -316,7 +327,9 @@ def rebuild_timeline(
 
     # Every play a starter took part in, once per game.
     for s in starters_info:
-        s["pattern"] = name_pattern(s.get("name") or "")
+        s["pattern"] = name_pattern(s.get("match_name") or s.get("name") or "") or name_pattern(
+            s.get("name") or ""
+        )
     events: dict[str, list[tuple[datetime, dict]]] = {s["id"]: [] for s in starters_info}
     by_game: dict[int, list[dict]] = {}
     for s in starters_info:
@@ -332,6 +345,23 @@ def rebuild_timeline(
                 break
             for e in play_events(play, players, scoring):
                 events[e["id"]].append((t, e))
+
+    # Point jumps seen live that no matched play explains: name the player.
+    for s in starters_info:
+        hist = sorted(points_history.get(s["id"]) or [], key=lambda h: h[0])
+        evs = events[s["id"]]
+        for (t0, p0), (t1, p1) in zip(hist, hist[1:]):
+            if t1 > now:
+                break
+            seen = float(p1 or 0) - float(p0 or 0)
+            matched = sum(e["pts"] for t, e in evs if t0 < t <= t1)
+            left = round(seen - matched, 2)
+            if abs(left) >= UNEXPLAINED_MIN:
+                evs.append((t1, {
+                    "id": s["id"], "name": s["name"], "position": s.get("position"),
+                    "side": s["side"], "pts": left,
+                    "label": f"{left:+.1f} pts".replace("-", "\u2212"), "kind": "points",
+                }))
 
     starters = [
         _Starter(
@@ -410,6 +440,7 @@ def rebuild_timeline(
         points.append(point)
     for s in starters_info:
         s.pop("pattern", None)
+        s.pop("match_name", None)
     return {
         "points": points,
         "windows": [{"start": a.isoformat(), "end": b.isoformat()} for a, b in windows],
@@ -424,9 +455,9 @@ async def rebuild_odds_history(db, conn, now: datetime | None = None) -> dict:
 
     from sqlalchemy import select
 
-    from app.models import MatchupOdds
+    from app.models import MatchupOdds, Player
     from app.services.gameplan_service import build_matchup_preview
-    from app.services.nfl_plays_service import game_plays, week_games
+    from app.services.nfl_plays_service import game_feed, week_games
     from app.services.odds_timeline import week_kickoffs
     from app.services.schedule_service import utc_now
 
@@ -493,10 +524,28 @@ async def rebuild_odds_history(db, conn, now: datetime | None = None) -> dict:
         and games[s["team"]]["kickoff"] <= now
     }
     fetched = await asyncio.gather(
-        *(game_plays(g["event_id"], g["final"]) for g in needed.values())
+        *(game_feed(g["event_id"], g["final"]) for g in needed.values())
     )
-    for g, plays in zip(needed.values(), fetched):
-        g["plays"] = plays
+    athletes: dict[str, dict] = {}
+    for g, feed in zip(needed.values(), fetched):
+        g["plays"] = (feed or {}).get("plays")
+        athletes.update((feed or {}).get("athletes") or {})
+
+    # Find starters in play text by ESPN's own spelling of their names,
+    # through the ESPN ids the league sync stores.
+    espn_ids = dict(
+        (
+            await db.execute(
+                select(Player.id, Player.espn_id).where(
+                    Player.id.in_([s["id"] for s in starters]), Player.espn_id.is_not(None)
+                )
+            )
+        ).all()
+    )
+    for s in starters:
+        a = athletes.get(str(espn_ids.get(s["id"]) or ""))
+        if a and a.get("name"):
+            s["match_name"] = a["name"]
 
     # What the app believed about each starter's projection over time.
     snaps = (
@@ -507,7 +556,10 @@ async def rebuild_odds_history(db, conn, now: datetime | None = None) -> dict:
         )
     ).scalars().all()
     history: dict[str, list] = {}
+    seen_points: dict[str, list] = {}
     for snap in snaps:
+        for pid, pts in (snap.player_points or {}).items():
+            seen_points.setdefault(pid, []).append((snap.captured_at, pts))
         for pid, v in (snap.player_proj or {}).items():
             history.setdefault(pid, []).append(
                 (snap.captured_at, v.get("proj"), v.get("sd"), v.get("status"))
@@ -528,6 +580,7 @@ async def rebuild_odds_history(db, conn, now: datetime | None = None) -> dict:
         now,
         conn.scoring_type or "ppr",
         history,
+        points_history=seen_points,
     )
     ends = {}
     for g in games.values():

@@ -18,7 +18,6 @@ import {
   hasGamesToday,
   parseUtc,
   signed,
-  swingLabel,
   swingPct,
   type ChartDatum,
   type OddsEvent,
@@ -31,14 +30,7 @@ const DOWN = "#dc2626";
 const MUTED = "#9ca3af";
 // The card's own background, so labels and dots get a halo in either theme.
 const SURFACE = "rgb(var(--surface))";
-// Below this chart width, swing labels drop off the chart (the dots stay; the
-// list underneath carries the detail) so they don't pile on top of each other.
-const LABEL_MIN_WIDTH = 520;
 const LIST_PREVIEW = 5;
-// At most this many swings get a text label on the chart, biggest first, and
-// never two closer than LABEL_GAP_PX on the same side of the line.
-const MAX_LABELS = 6;
-const LABEL_GAP_PX = 96;
 // Plot area = chart width minus the y-axis and right margin.
 const PLOT_INSET_PX = 56;
 
@@ -62,14 +54,14 @@ function helped(e: OddsEvent): boolean {
 
 function EventLine({ e }: { e: OddsEvent }) {
   return (
-    <span className="whitespace-nowrap">
+    <span>
       <span className="font-semibold text-gray-800 dark:text-gray-200">{eventText(e)}</span>
       {e.side === "opp" && (
         <span className="ml-1 rounded bg-gray-100 px-1 text-[9px] font-bold uppercase text-gray-500 dark:bg-gray-800">
           opp
         </span>
       )}
-      {e.kind !== "news" && (
+      {e.kind !== "news" && e.kind !== "points" && (
         <span
           className={`ml-1 tabular-nums ${helped(e) ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
         >
@@ -83,12 +75,22 @@ function EventLine({ e }: { e: OddsEvent }) {
 function OddsTooltip({
   active,
   payload,
+  data,
 }: {
   active?: boolean;
   payload?: { payload: ChartDatum }[];
+  data: ChartDatum[];
 }) {
-  const d = payload?.[0]?.payload;
+  let d = payload?.[0]?.payload;
   if (!active || !d) return null;
+  // Every play has a sample a second before it (so the line steps); both sit
+  // on the same pixel, so hovering the marker can land on the "before" one.
+  // Show the play instead.
+  if (!d.point.events?.length) {
+    const i = data.indexOf(d);
+    const next = i >= 0 ? data[i + 1] : undefined;
+    if (next && next.t - d.t <= 5_000 && next.point.events?.length) d = next;
+  }
   const p = d.point;
   const events = p.swing?.drivers.length ? p.swing.drivers : (p.events ?? []).slice(0, 4);
   const delta = p.swing?.delta ?? p.delta ?? null;
@@ -108,8 +110,13 @@ function OddsTooltip({
           You {p.user_points.toFixed(1)} – {p.opp_points.toFixed(1)}
         </p>
       )}
+      {p.swing && (
+        <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+          {p.swing.delta > 0 ? "Helped you" : "Hurt you"}
+        </p>
+      )}
       {events.length > 0 && (
-        <div className="mt-1 space-y-0.5">
+        <div className="mt-0.5 space-y-0.5">
           {events.map((e, i) => (
             <div key={`${e.id}-${i}`}>
               <EventLine e={e} />
@@ -135,27 +142,6 @@ export default function OddsChart({ history }: { history: OddsHistory }) {
     () => buildTimeline(history, now, view, plot),
     [history, now, view, plot],
   );
-  const showLabels = width >= LABEL_MIN_WIDTH;
-
-  // Pick which swings get a label: the biggest ones that have room.
-  const labeled = useMemo(() => {
-    const out = new Set<number>();
-    if (!showLabels || tl.end <= 0) return out;
-    const taken: { px: number; up: boolean }[] = [];
-    const bySize = [...tl.swings].sort(
-      (a, b) => Math.abs(b.swing.delta) - Math.abs(a.swing.delta),
-    );
-    for (const { datum, swing } of bySize) {
-      if (out.size >= MAX_LABELS) break;
-      const px = (datum.x / tl.end) * plot;
-      const up = swing.delta > 0;
-      if (taken.some((t) => t.up === up && Math.abs(t.px - px) < LABEL_GAP_PX)) continue;
-      taken.push({ px, up });
-      out.add(datum.t);
-    }
-    return out;
-  }, [tl, plot, showLabels]);
-
   // Split colour at 50%: green while you're favoured, red while you're not.
   const { lineSplit, areaSplit } = useMemo(() => {
     const ys = tl.data.map((d) => d.you);
@@ -227,10 +213,10 @@ export default function OddsChart({ history }: { history: OddsHistory }) {
   return (
     <div className="mt-6" ref={ref}>
       {head}
-      <ResponsiveContainer width="100%" height={showLabels ? 230 : 190}>
+      <ResponsiveContainer width="100%" height={210}>
         <ComposedChart
           data={tl.data}
-          margin={{ top: showLabels ? 22 : 10, right: 14, bottom: 0, left: -14 }}
+          margin={{ top: 14, right: 14, bottom: 0, left: -14 }}
         >
           <defs>
             <linearGradient id={`line-${gradId}`} x1="0" y1="0" x2="0" y2="1">
@@ -273,7 +259,7 @@ export default function OddsChart({ history }: { history: OddsHistory }) {
             tickLine={false}
             tickFormatter={(v) => `${v}%`}
           />
-          <Tooltip content={<OddsTooltip />} cursor={{ stroke: MUTED, strokeDasharray: "2 2" }} />
+          <Tooltip content={<OddsTooltip data={tl.data} />} cursor={{ stroke: MUTED, strokeDasharray: "2 2" }} />
           <Area
             type="linear"
             dataKey="you"
@@ -285,37 +271,19 @@ export default function OddsChart({ history }: { history: OddsHistory }) {
             activeDot={{ r: 4 }}
             dot={false}
           />
-          {tl.swings.map(({ datum, swing }) => {
-            const color = swing.delta > 0 ? UP : DOWN;
-            const withLabel = labeled.has(datum.t);
-            return (
-              <ReferenceDot
-                key={`s-${datum.t}`}
-                x={datum.x}
-                y={datum.you}
-                r={withLabel ? 4.5 : 3}
-                fill={color}
-                stroke={SURFACE}
-                strokeWidth={1.5}
-                ifOverflow="visible"
-                label={
-                  withLabel
-                    ? {
-                        value: swingLabel(swing),
-                        position: swing.delta > 0 ? (datum.you > 88 ? "bottom" : "top") : datum.you < 12 ? "top" : "bottom",
-                        fontSize: 10,
-                        fontWeight: 600,
-                        fill: color,
-                        stroke: SURFACE,
-                        strokeWidth: 3,
-                        paintOrder: "stroke",
-                        offset: 8,
-                      }
-                    : undefined
-                }
-              />
-            );
-          })}
+          {/* Each swing is a small marker; hover or tap for the play. */}
+          {tl.swings.map(({ datum, swing }) => (
+            <ReferenceDot
+              key={`s-${datum.t}`}
+              x={datum.x}
+              y={datum.you}
+              r={3.5}
+              fill={swing.delta > 0 ? UP : DOWN}
+              stroke={SURFACE}
+              strokeWidth={1.5}
+              ifOverflow="visible"
+            />
+          ))}
           {/* Where things stand right now. */}
           <ReferenceDot
             x={last.x}

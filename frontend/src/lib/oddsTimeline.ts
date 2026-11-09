@@ -14,7 +14,7 @@ export interface OddsEvent {
   side: "user" | "opp";
   pts: number;
   label: string; // "45-yd TD run", "INT", "→ Injured Reserve, −16.6 proj"
-  kind: "td" | "play" | "turnover" | "kick" | "news";
+  kind: "td" | "play" | "turnover" | "kick" | "news" | "points";
 }
 export interface OddsSwing {
   delta: number;
@@ -262,9 +262,10 @@ export function swingLabel(s: OddsSwing): string {
   return `${shortName(d)} ${eventTag(d)} ${swingPct(s.delta)}`;
 }
 
-/** Full description: "Gibbs 45-yd TD run", "Adams → Injured Reserve, −16.6 proj". */
+/** Full description: "Brock Purdy 32-yd TD pass", "Jahmyr Gibbs +8.4 pts",
+ * "Davante Adams → Injured Reserve, −16.6 proj". */
 export function eventText(e: OddsEvent): string {
-  return `${shortName(e)} ${e.label}`;
+  return `${e.name} ${e.label}`;
 }
 
 export function fmtDayClock(ms: number): string {

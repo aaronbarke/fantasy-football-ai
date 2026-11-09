@@ -161,15 +161,34 @@ def parse_plays(summary: dict) -> list[dict]:
     return plays
 
 
-async def game_plays(event_id: str, final: bool) -> list[dict] | None:
-    """Parsed plays for one game (None if ESPN couldn't be reached)."""
-    key = f"nfl:plays:{event_id}"
+def parse_athletes(summary: dict) -> dict[str, dict]:
+    """ESPN athlete id → ESPN's own spelling of the name, from the box score.
+    Play text names players ESPN's way ("J.Love"), so matching a rostered
+    player through his ESPN id beats matching our stored name."""
+    out: dict[str, dict] = {}
+    for team in (summary.get("boxscore") or {}).get("players") or []:
+        abbr = _team_abbr(team)
+        for cat in team.get("statistics") or []:
+            for a in cat.get("athletes") or []:
+                ath = a.get("athlete") or {}
+                if not ath.get("id"):
+                    continue
+                first = ath.get("firstName") or ""
+                last = ath.get("lastName") or ""
+                name = f"{first} {last}".strip() or ath.get("displayName") or ""
+                out[str(ath["id"])] = {"name": name, "team": abbr}
+    return out
+
+
+async def game_feed(event_id: str, final: bool) -> dict | None:
+    """One game's plays and athletes (None if ESPN couldn't be reached)."""
+    key = f"nfl:feed:{event_id}"
     cached = await cache_get(key)
     if cached is not None:
         return cached
     data = await _fetch_json(SUMMARY_URL, {"event": event_id})
     if data is None:
         return None
-    plays = parse_plays(data)
-    await cache_set(key, plays, FINAL_TTL if final else LIVE_TTL)
-    return plays
+    feed = {"plays": parse_plays(data), "athletes": parse_athletes(data)}
+    await cache_set(key, feed, FINAL_TTL if final else LIVE_TTL)
+    return feed

@@ -14,9 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import MatchupOdds, NflSchedule
 from app.services.schedule_service import GAME_FINISHED_AFTER
 
-# A move of at least this much win probability (5 percentage points) between
-# two snapshots is a "swing": the chart marks it and names the players behind it.
-SWING_THRESHOLD = 0.05
+# A move of at least this much win probability (3 percentage points) is a
+# "swing": the chart marks it and names the play or players behind it.
+SWING_THRESHOLD = 0.03
 # Smaller point changes are rounding noise (and stat corrections of a tenth).
 _MIN_POINT_CHANGE = 0.05
 # A swing names at most this many players.
