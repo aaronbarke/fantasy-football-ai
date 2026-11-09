@@ -2,15 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Line,
-  LineChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { EmptyState, LoadingState, ErrorState } from "@/components/PageState";
@@ -18,6 +9,8 @@ import InjuryBadge from "@/components/InjuryBadge";
 import { api, ApiError } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import PlayerAvatar from "@/components/PlayerAvatar";
+import OddsChart from "@/components/OddsChart";
+import type { OddsHistory } from "@/lib/oddsTimeline";
 import ProjectionMath, { type ProjectionBreakdown } from "@/components/ProjectionMath";
 import { injuryColor, positionColor } from "@/lib/utils";
 import { RefreshCw, Sparkles } from "lucide-react";
@@ -53,17 +46,6 @@ interface MatchupPreview {
   opponent?: MTeam;
   rows?: MRow[];
 }
-interface OddsPoint {
-  t: string | null;
-  win_probability: number;
-  user_points: number | null;
-  opp_points: number | null;
-}
-interface OddsHistory {
-  week: number | null;
-  points: OddsPoint[];
-}
-
 const POLL_MS = 45_000;
 
 // Phone-width labels for injury designations, so a long status like "Injured
@@ -168,54 +150,6 @@ function PlayerSide({
           </div>
         );
       })()}
-    </div>
-  );
-}
-
-function fmtTime(t: string | null): string {
-  if (!t) return "";
-  const norm = /[Z]|[+-]\d\d:?\d\d$/.test(t) ? t : `${t}Z`;
-  const d = new Date(norm);
-  return Number.isNaN(d.getTime())
-    ? ""
-    : d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-function OddsChart({ points }: { points: OddsPoint[] }) {
-  const data = points.map((p) => ({
-    time: fmtTime(p.t),
-    you: Math.round(p.win_probability * 100),
-  }));
-  return (
-    <div className="mt-6">
-      <p className="mb-1 text-xs font-semibold text-gray-400">
-        Your win probability today
-      </p>
-      <ResponsiveContainer width="100%" height={150}>
-        <LineChart data={data} margin={{ top: 6, right: 10, bottom: 0, left: -18 }}>
-          <ReferenceLine y={50} stroke="#a1a1aa" strokeDasharray="3 3" />
-          <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#9ca3af" }} stroke="#9ca3af" minTickGap={28} />
-          <YAxis
-            domain={[0, 100]}
-            ticks={[0, 25, 50, 75, 100]}
-            tick={{ fontSize: 10, fill: "#9ca3af" }}
-            stroke="#9ca3af"
-            tickFormatter={(v) => `${v}%`}
-          />
-          <Tooltip
-            formatter={(v: number | string) => [`${v}% you`, "Win prob"]}
-            contentStyle={{ fontSize: 12, borderRadius: 8 }}
-          />
-          <Line
-            type="monotone"
-            dataKey="you"
-            stroke="#3b6af0"
-            strokeWidth={2}
-            dot={false}
-            isAnimationActive={false}
-          />
-        </LineChart>
-      </ResponsiveContainer>
     </div>
   );
 }
@@ -459,8 +393,8 @@ export default function MatchupPage() {
                 </div>
               )}
 
-              {data.live && (odds?.points.length ?? 0) >= 2 && (
-                <OddsChart points={odds!.points} />
+              {data.live && (odds?.points.length ?? 0) >= 1 && (
+                <OddsChart history={odds!} />
               )}
             </div>
 

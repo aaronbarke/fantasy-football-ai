@@ -432,7 +432,11 @@ async def get_odds_history(
     db: AsyncSession = Depends(get_db),
 ):
     """Win-probability timeline for a matchup week (defaults to the week with the
-    most recent snapshot — the one being played)."""
+    most recent snapshot — the one being played): every snapshot since the
+    first kickoff, the week's kickoffs, and the big swings with the players
+    whose points caused them."""
+    from app.services.odds_timeline import build_odds_history, week_kickoffs
+
     conn = await _get_user_connection(db, user, connection_id)
     if week is None:
         week = (
@@ -444,7 +448,7 @@ async def get_odds_history(
             )
         ).scalar_one_or_none()
     if week is None:
-        return {"week": None, "points": []}
+        return {"week": None, "points": [], "kickoffs": [], "window_start": None}
     rows = (
         await db.execute(
             select(MatchupOdds)
@@ -452,18 +456,8 @@ async def get_odds_history(
             .order_by(MatchupOdds.captured_at.asc(), MatchupOdds.id.asc())
         )
     ).scalars().all()
-    return {
-        "week": week,
-        "points": [
-            {
-                "t": r.captured_at.isoformat() if r.captured_at else None,
-                "win_probability": r.win_probability,
-                "user_points": r.user_points,
-                "opp_points": r.opp_points,
-            }
-            for r in rows
-        ],
-    }
+    kickoffs = await week_kickoffs(db, conn.season, week)
+    return {"week": week, **build_odds_history(list(rows), kickoffs)}
 
 
 # Fantasy playoffs are the NFL's weeks 15-17 in most leagues.
