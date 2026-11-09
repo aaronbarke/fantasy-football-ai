@@ -219,7 +219,8 @@ export default function MatchupPage() {
     queryKey: ["matchup-odds", league?.id],
     queryFn: () =>
       api<OddsHistory>(`/api/leagues/${league!.id}/matchup/odds-history`),
-    enabled: !!league && live,
+    // Pre-game too: the chart then explains it starts at kickoff.
+    enabled: !!league && data?.status === "ok",
     retry: false,
   });
 
@@ -393,9 +394,7 @@ export default function MatchupPage() {
                 </div>
               )}
 
-              {data.live && (odds?.points.length ?? 0) >= 1 && (
-                <OddsChart history={odds!} />
-              )}
+              {odds && odds.week != null && <OddsChart history={odds} />}
             </div>
 
             {/* Position battles */}

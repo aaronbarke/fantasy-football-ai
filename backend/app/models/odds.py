@@ -31,6 +31,11 @@ class MatchupOdds(Base):
     opp_points: Mapped[float | None] = mapped_column(Float)
     # {player_id: live points} for both starting lineups at capture time.
     player_points: Mapped[dict[str, float] | None] = mapped_column(JSONVariant)
+    # {player_id: {proj, sd, status}} for both starting lineups at capture
+    # time, so a later rebuild knows what the app believed then, and an injury
+    # designation shows as a named drop at the moment it landed.
+    player_proj: Mapped[dict[str, Any] | None] = mapped_column(JSONVariant)
     # Starters whose points moved since the previous snapshot:
-    # [{id, name, position, side: "user"|"opp", delta, points}], biggest first.
+    # [{id, name, position, side: "user"|"opp", delta, points}], biggest first,
+    # plus projection/status news: [{..., kind: "news", status, proj_delta}].
     changes: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONVariant)

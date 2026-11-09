@@ -431,13 +431,27 @@ async def get_odds_history(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Win-probability timeline for a matchup week (defaults to the week with the
-    most recent snapshot — the one being played): every snapshot since the
-    first kickoff, the week's kickoffs, and the big swings with the players
-    whose points caused them."""
+    """Win-probability timeline. With no ``week``, the current matchup's curve
+    rebuilt from play-by-play: first kickoff to now, the week's kickoffs, and
+    the big swings with the plays and players behind them. With a ``week``
+    (or when there's no current matchup), the recorded snapshots for it."""
+    from app.services.cache import cache_get, cache_set
+    from app.services.odds_rebuild import rebuild_odds_history
     from app.services.odds_timeline import build_odds_history, week_kickoffs
 
     conn = await _get_user_connection(db, user, connection_id)
+    if week is None:
+        # The current matchup: rebuilt from play-by-play so the whole scoring
+        # period is covered whether or not anyone was watching. Cached briefly
+        # since the page polls.
+        key = f"odds:rebuild:{conn.id}"
+        cached = await cache_get(key)
+        if cached is not None:
+            return cached
+        out = await rebuild_odds_history(db, conn)
+        if out.get("week") is not None:
+            await cache_set(key, out, 30)
+            return out
     if week is None:
         week = (
             await db.execute(
