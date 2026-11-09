@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 # the same change for databases that run migrations.)
 ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("projection_snapshots", "calibration_adj", "FLOAT"),
+    ("matchup_odds", "player_points", "JSONB"),
+    ("matchup_odds", "changes", "JSONB"),
 ]
 
 

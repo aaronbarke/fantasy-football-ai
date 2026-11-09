@@ -11,6 +11,9 @@ Cadence:
 - League sync: every 2 hours
 - Weather: Thu–Mon 6 AM + noon CT (game days only)
 - NFL schedule: daily 4 AM CT (flexed kickoff times; week resolution + byes)
+- Live odds: every 2 min while an NFL game is on — pulls each league's live
+  scores and snapshots the matchup's win probability, so the Matchup chart
+  covers the whole scoring period, not just while the page is open
 - Accuracy snapshots: every 30 min (pre-game projections + recommended lineups,
   frozen at kickoff); grading Tue 7 AM + Wed 8 AM CT, after the stats land
 """
@@ -33,7 +36,7 @@ from app.services.nfl_data_service import sync_id_crosswalk, sync_weekly_stats
 from app.services.odds_service import sync_odds
 from app.services.schedule_service import sync_schedule
 from app.services.sleeper_service import SleeperClient
-from app.services.sync_service import sync_league, sync_player_pool
+from app.services.sync_service import sync_league, sync_live_scores, sync_player_pool
 from app.services.weather_service import get_game_weather
 
 logger = logging.getLogger(__name__)
@@ -189,6 +192,52 @@ async def job_sync_all_leagues() -> None:
                 logger.exception("League sync failed for %s league %s", platform, league_id)
 
 
+async def job_record_live_odds() -> None:
+    await record_live_odds(SessionLocal)
+
+
+async def record_live_odds(session_factory, now: datetime | None = None) -> int:
+    """While any NFL game is on, pull each current-season league's live scores
+    and snapshot the user's win probability (deduped when nothing moved).
+    Returns how many leagues were checked. Off-hours it's one cheap query."""
+    from app.services.gameplan_service import build_matchup_preview
+    from app.services.odds_timeline import game_in_progress
+    from app.services.schedule_service import utc_now
+
+    now = now or utc_now()
+    season = get_settings().current_season
+    async with session_factory() as db:
+        if not await game_in_progress(db, now):
+            return 0
+        conn_ids = (
+            await db.execute(
+                select(LeagueConnection.id).where(
+                    LeagueConnection.season == season,
+                    LeagueConnection.team_id.is_not(None),
+                )
+            )
+        ).scalars().all()
+    checked = 0
+    # One session per league, so one league's failure (an expired ESPN cookie,
+    # say) can't poison the rest.
+    for conn_id in conn_ids:
+        async with session_factory() as db:
+            conn = await db.get(LeagueConnection, conn_id)
+            if conn is None:
+                continue
+            platform, league_id = conn.platform, conn.league_id
+            try:
+                await sync_live_scores(db, conn)
+                await build_matchup_preview(db, conn, now=now, record_from_kickoff=True)
+                checked += 1
+            except Exception:
+                await db.rollback()
+                logger.exception(
+                    "Live odds snapshot failed for %s league %s", platform, league_id
+                )
+    return checked
+
+
 async def job_refresh_schedule() -> None:
     """Re-pull the season schedule so flexed games carry their real kickoff —
     live scoring, bye detection and odds-to-week matching all read it."""
@@ -276,6 +325,14 @@ def start_scheduler() -> None:
         IntervalTrigger(hours=2),
         id="league_sync",
         misfire_grace_time=600,
+    )
+    scheduler.add_job(
+        job_record_live_odds,
+        IntervalTrigger(minutes=2),
+        id="live_odds",
+        misfire_grace_time=60,
+        max_instances=1,
+        coalesce=True,
     )
     scheduler.add_job(
         job_refresh_weather,

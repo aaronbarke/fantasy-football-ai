@@ -20,6 +20,7 @@ from app.models import (
     Player,
     Roster,
 )
+from app.services.odds_timeline import player_changes, starter_points, week_started
 from app.services.projection_service import compute_projections, win_probability
 from app.services.schedule_service import current_nfl_week
 
@@ -395,15 +396,25 @@ async def resolve_current_matchup(
     return unplayed[0] if unplayed else mine[-1]
 
 
-async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dict:
+async def build_matchup_preview(
+    db: AsyncSession,
+    conn: LeagueConnection,
+    *,
+    now: datetime | None = None,
+    record_from_kickoff: bool = False,
+) -> dict:
     """Head-to-head scouting report: both lineups aligned slot by slot (the
     league's real lineup, K/DEF included), current + projected scores, each
     team's bench, and a live win probability. Uses the same projection engine as
-    the Game Plan."""
+    the Game Plan.
+
+    A live matchup's odds are snapshotted for the history chart. The scheduler's
+    live-odds job passes ``record_from_kickoff`` so the first snapshot lands at
+    the week's first kickoff, before anyone has scored — the chart's start."""
     if not conn.team_id:
         return {"status": "no_team"}
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
     m = await resolve_current_matchup(db, conn, now)
     if m is None:
         return {"status": "no_matchup"}
@@ -479,8 +490,10 @@ async def build_matchup_preview(db: AsyncSession, conn: LeagueConnection) -> dic
     )
 
     # Snapshot the live odds so the page can chart how they moved during games.
-    if live:
-        await _record_odds_snapshot(db, conn, m.week, win_prob, user_points, opp_points)
+    if live or (record_from_kickoff and week_started(kickoffs, now)):
+        await _record_odds_snapshot(
+            db, conn, m.week, win_prob, user_points, opp_points, rows, now
+        )
 
     return {
         "status": "ok",
@@ -500,9 +513,13 @@ async def _record_odds_snapshot(
     win_prob: float,
     user_points: float | None,
     opp_points: float | None,
+    rows: list[dict],
+    now: datetime,
 ) -> None:
     """Append a win-probability point, but only when it actually moved (score or
-    odds changed) — so the timeline is meaningful and writes stay bounded."""
+    odds changed) — so the timeline is meaningful and writes stay bounded. Each
+    point keeps the starters' live points and which of them moved since the
+    previous point, so the chart can say who caused a swing."""
     last = (
         await db.execute(
             select(MatchupOdds)
@@ -519,13 +536,18 @@ async def _record_odds_snapshot(
         and float(last.opp_points or 0) == op
     ):
         return
+    points, meta = starter_points(rows)
+    changes = player_changes(last.player_points if last is not None else None, points, meta)
     db.add(
         MatchupOdds(
             connection_id=conn.id,
             week=week,
+            captured_at=now,
             win_probability=round(win_prob, 4),
             user_points=up,
             opp_points=op,
+            player_points=points,
+            changes=changes,
         )
     )
     await db.commit()
