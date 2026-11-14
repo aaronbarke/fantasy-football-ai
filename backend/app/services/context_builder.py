@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models import (
     AvailablePlayer,
     GameCondition,
@@ -349,7 +350,7 @@ async def build_context(
 ) -> tuple[str, dict[str, Any]]:
     """Returns (intent, context dict) ready for prompt injection."""
     intent = classify_intent(question)
-    season = conn.season if conn else 2026
+    season = conn.season if conn else get_settings().current_season
     scoring_type = (conn.scoring_type if conn else None) or "ppr"
 
     context: dict[str, Any] = {"question_type": intent, "season": season}

@@ -22,6 +22,7 @@ from app.services.espn_service import (
     PRO_TEAM_MAP,
     ESPNClient,
     espn_defense_code,
+    normalize_swid,
     roster_positions_from_espn,
     scoring_type_from_espn,
 )
@@ -34,6 +35,11 @@ from app.utils.fantasy_math import scoring_type_from_settings
 from app.utils.player_id_map import espn_to_sleeper_map, normalize_name
 
 logger = logging.getLogger(__name__)
+
+
+class LeagueNotFoundError(Exception):
+    """The platform has no league with that id."""
+
 
 # Defensive positions Sleeper exposes, kept in the depth_chart snapshot so the
 # projection model can react to opposing defenders being out. Offensive skill
@@ -147,12 +153,15 @@ async def sync_sleeper_league(db: AsyncSession, conn: LeagueConnection) -> None:
     finally:
         await client.close()
 
-    if league:
-        conn.league_name = league.get("name")
-        conn.scoring_settings = league.get("scoring_settings")
-        conn.roster_positions = league.get("roster_positions")
-        # Keep the scoring format current if the commissioner changes it.
-        conn.scoring_type = scoring_type_from_settings(conn.scoring_settings)
+    if not league:
+        # Sleeper answers 404 for an unknown id, which the client turns into
+        # None/[] — carrying on used to "connect" an empty, nameless league.
+        raise LeagueNotFoundError(conn.league_id)
+    conn.league_name = league.get("name")
+    conn.scoring_settings = league.get("scoring_settings")
+    conn.roster_positions = league.get("roster_positions")
+    # Keep the scoring format current if the commissioner changes it.
+    conn.scoring_type = scoring_type_from_settings(conn.scoring_settings)
 
     owner_names = {
         u["user_id"]: (u.get("metadata") or {}).get("team_name") or u.get("display_name")
@@ -531,7 +540,7 @@ async def sync_espn_league(db: AsyncSession, conn: LeagueConnection) -> None:
     espn_map = await resolve_espn_ids(db, seen, espn_map)
 
     # Identify the user's team from their SWID cookie (ESPN owner GUIDs are SWIDs)
-    swid = (creds.get("swid") or "").strip().upper()
+    swid = (normalize_swid(creds.get("swid")) or "").upper()
     if not conn.team_id and swid:
         for team in data.get("teams", []):
             owners = [str(o).upper() for o in (team.get("owners") or [])]

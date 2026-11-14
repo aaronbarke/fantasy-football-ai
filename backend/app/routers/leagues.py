@@ -19,6 +19,12 @@ from app.models import (
 )
 from app.schemas.league import (
     ConnectLeagueRequest,
+    EspnCredentialsRequest,
+    EspnCredentialsResponse,
+    EspnLeagueOption,
+    EspnLookupRequest,
+    EspnLookupResponse,
+    EspnRefreshedLeague,
     LeagueConnectionResponse,
     MatchupResponse,
     RosterResponse,
@@ -28,9 +34,11 @@ from app.schemas.league import (
     StandingsEntry,
     WaiverPlayer,
 )
+from app.services.espn_service import discover_espn_leagues, normalize_swid
+from app.services.schedule_service import current_nfl_week
 from app.services.sleeper_service import SleeperClient
-from app.services.sync_service import sync_league, sync_live_scores
-from app.utils.credentials import seal_credentials
+from app.services.sync_service import LeagueNotFoundError, sync_league, sync_live_scores
+from app.utils.credentials import open_credentials, seal_credentials
 from app.utils.fantasy_math import scoring_type_from_settings
 from app.utils.security import block_demo, get_current_user
 
@@ -47,10 +55,12 @@ def _sync_failure(conn: LeagueConnection, exc: Exception) -> HTTPException:
     )
     platform = "ESPN" if conn.platform == "espn" else "Sleeper"
     code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    if isinstance(exc, LeagueNotFoundError):
+        code = 404
     if code in (401, 403):
         detail = (
             f"{platform} refused access to that league — for a private league, "
-            "check your espn_s2 and SWID cookies."
+            "your ESPN sign-in (the espn_s2 and SWID cookies) is missing or expired."
         )
     elif code == 404:
         detail = f"{platform} couldn't find that league — check the league ID and season."
@@ -123,6 +133,120 @@ async def sleeper_lookup(body: SleeperLookupRequest, _: User = Depends(get_curre
     )
 
 
+@router.post("/espn/lookup", response_model=EspnLookupResponse)
+async def espn_lookup(
+    body: EspnLookupRequest,
+    user: User = Depends(block_demo),
+    db: AsyncSession = Depends(get_db),
+):
+    """The ESPN fantasy football leagues this ESPN account plays in, so the
+    user picks one from a list (as with Sleeper) instead of copying a league ID
+    out of a URL. The cookies are used for this one call and not stored."""
+    try:
+        leagues = await discover_espn_leagues(
+            body.swid, body.espn_s2, get_settings().current_season
+        )
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("ESPN league lookup failed: %s", type(exc).__name__)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Couldn't load your leagues from ESPN — enter the league's web address instead.",
+        ) from exc
+
+    connected = {
+        (league_id, season)
+        for league_id, season in (
+            await db.execute(
+                select(LeagueConnection.league_id, LeagueConnection.season).where(
+                    LeagueConnection.user_id == user.id, LeagueConnection.platform == "espn"
+                )
+            )
+        ).all()
+    }
+    return EspnLookupResponse(
+        leagues=[
+            EspnLeagueOption(**lg, connected=(lg["league_id"], lg["season"]) in connected)
+            for lg in leagues
+        ]
+    )
+
+
+def _uses_espn_account(conn: LeagueConnection, swid: str) -> bool:
+    """True when a connected ESPN league signs in as this ESPN account — or
+    has stored cookies we can no longer read, which only fresh ones can fix.
+    Public leagues (no stored cookies) and leagues connected through a
+    different ESPN account are left alone."""
+    if not conn.credentials:
+        return False
+    stored = normalize_swid(open_credentials(conn.credentials).get("swid"))
+    return stored is None or stored.upper() == swid.upper()
+
+
+async def _espn_account_connections(
+    db: AsyncSession, user: User, swid: str
+) -> list[LeagueConnection]:
+    """The user's private ESPN leagues that sign in as this ESPN account."""
+    conns = (
+        await db.execute(
+            select(LeagueConnection)
+            .where(LeagueConnection.user_id == user.id, LeagueConnection.platform == "espn")
+            .order_by(LeagueConnection.created_at, LeagueConnection.id)
+        )
+    ).scalars().all()
+    return [c for c in conns if _uses_espn_account(c, swid)]
+
+
+async def _share_espn_cookies(
+    db: AsyncSession, user: User, espn_s2: str, swid: str, skip: uuid.UUID
+) -> bool:
+    """Put cookies that just worked for one league on the user's other leagues
+    under the same ESPN account. ESPN signs the whole account in or out at
+    once, so when one league's cookies expire they all have — re-entering them
+    for one league shouldn't leave the rest failing until each is redone.
+    True if any league changed; the caller commits."""
+    changed = False
+    for conn in await _espn_account_connections(db, user, swid):
+        if conn.id != skip:
+            conn.credentials = seal_credentials({"espn_s2": espn_s2, "swid": swid})
+            changed = True
+    return changed
+
+
+@router.post("/espn/credentials", response_model=EspnCredentialsResponse)
+async def refresh_espn_credentials(
+    body: EspnCredentialsRequest,
+    user: User = Depends(block_demo),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the stored ESPN cookies on all of this user's private ESPN
+    leagues and re-sync each one — the one-step fix for an expired ESPN
+    sign-in. A league whose sync still fails keeps its old cookies."""
+    conn_ids = [c.id for c in await _espn_account_connections(db, user, body.swid)]
+    sealed = seal_credentials({"espn_s2": body.espn_s2, "swid": body.swid})
+    results: list[EspnRefreshedLeague] = []
+    # Each league is saved by its own sync (which commits), and rolled back on
+    # its own if ESPN still refuses it.
+    for conn_id in conn_ids:
+        conn = await db.get(LeagueConnection, conn_id)
+        if conn is None:
+            continue
+        name = conn.league_name
+        conn.credentials = sealed
+        try:
+            await sync_league(db, conn)
+        except Exception as exc:
+            detail = _sync_failure(conn, exc).detail  # before rollback expires conn
+            await db.rollback()
+            results.append(
+                EspnRefreshedLeague(id=str(conn_id), league_name=name, ok=False, detail=detail)
+            )
+            continue
+        results.append(
+            EspnRefreshedLeague(id=str(conn_id), league_name=conn.league_name, ok=True)
+        )
+    return EspnCredentialsResponse(leagues=results)
+
+
 @router.post("/connect", response_model=LeagueConnectionResponse, status_code=201)
 async def connect_league(
     body: ConnectLeagueRequest,
@@ -154,6 +278,10 @@ async def connect_league(
             failure = _sync_failure(existing, exc)  # before rollback expires conn
             await db.rollback()
             raise failure from exc
+        # These cookies just worked, and they belong to the whole ESPN account:
+        # hand them to the user's other leagues on it, which expired together.
+        if await _share_espn_cookies(db, user, body.espn_s2, body.swid, skip=existing.id):
+            await db.commit()
         return _conn_response(existing)
     if existing:
         raise HTTPException(status.HTTP_409_CONFLICT, "League already connected")
@@ -184,6 +312,9 @@ async def connect_league(
     if conn.platform == "sleeper":
         conn.scoring_type = scoring_type_from_settings(conn.scoring_settings)
         await db.commit()
+    elif body.espn_s2 and body.swid:
+        if await _share_espn_cookies(db, user, body.espn_s2, body.swid, skip=conn.id):
+            await db.commit()
     return _conn_response(conn)
 
 
@@ -420,7 +551,15 @@ async def refresh_live_scores(
     from app.services.gameplan_service import build_matchup_preview
 
     conn = await _get_user_connection(db, user, connection_id)
-    await sync_live_scores(db, conn)
+    try:
+        await sync_live_scores(db, conn)
+    except Exception as exc:
+        # Unhandled, this was a bare 500 with no CORS headers, which the page
+        # could only report as "couldn't reach the server" every poll — hiding
+        # the usual cause, an expired ESPN sign-in.
+        failure = _sync_failure(conn, exc)  # before rollback expires conn
+        await db.rollback()
+        raise failure from exc
     return await build_matchup_preview(db, conn)
 
 
@@ -479,7 +618,6 @@ async def schedule_strength(
     can scout postseason matchups ahead of time.
     """
     from app.services.schedule_service import build_schedule_strength
-    from app.services.sleeper_service import SleeperClient
 
     conn = await _get_user_connection(db, user, connection_id)
     roster = (
@@ -501,16 +639,20 @@ async def schedule_strength(
             weeks_ahead=FANTASY_PLAYOFF_WEEKS,
         )
 
-    week = 1
-    try:
-        client = SleeperClient()
+    # The schedule's week is the app's one definition of "this week"; Sleeper's
+    # clock is only a fallback for when no schedule is loaded.
+    week = await current_nfl_week(db, conn.season)
+    if week is None:
+        week = 1
         try:
-            state = await client.get_nfl_state()
-            week = int(state.get("week") or 1)
-        finally:
-            await client.close()
-    except Exception:
-        pass
+            client = SleeperClient()
+            try:
+                state = await client.get_nfl_state()
+                week = int(state.get("week") or 1)
+            finally:
+                await client.close()
+        except Exception:
+            pass
 
     return await build_schedule_strength(
         db, conn.season, max(week, 1), list(roster.players)

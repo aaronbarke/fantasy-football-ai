@@ -1,7 +1,8 @@
 """ESPN Fantasy API client (reverse-engineered, undocumented).
 
 Public leagues need only league_id + season. Private leagues require the
-espn_s2 and SWID cookies, which the user copies from their browser session.
+espn_s2 and SWID cookies from the user's ESPN session — handed over by the
+FFAI Connect browser extension, or pasted in by hand.
 """
 
 import json
@@ -10,6 +11,21 @@ from urllib.parse import quote
 import httpx
 
 BASE_URL = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl"
+# ESPN's fan profile: every fantasy team an account owns, across sports.
+FAN_URL = "https://fan.api.espn.com/apis/v2/fans"
+ESPN_FOOTBALL_GAME_ID = 1
+ESPN_FOOTBALL_ABBREV = "FFL"
+
+
+def normalize_swid(swid: str | None) -> str | None:
+    """A SWID in the shape ESPN uses everywhere: the GUID wrapped in braces.
+
+    ESPN only accepts the cookie with its braces, and lists league owners the
+    same way, so a SWID pasted without them both failed to sign in and never
+    matched the user's team."""
+    if not swid:
+        return None
+    return "{" + swid.strip().strip("{}") + "}"
 
 # ESPN lineup slot IDs → readable positions (Sleeper's names for the combo
 # slots, so both platforms share one lineup vocabulary). 3 = RB/WR, 5 = WR/TE,
@@ -54,7 +70,7 @@ class ESPNClient:
         self.season = season
         cookies = {}
         if espn_s2 and swid:
-            cookies = {"espn_s2": espn_s2, "SWID": swid}
+            cookies = {"espn_s2": espn_s2, "SWID": normalize_swid(swid)}
         self._client = httpx.AsyncClient(timeout=timeout, cookies=cookies)
 
     async def close(self) -> None:
@@ -171,3 +187,62 @@ def scoring_type_from_espn(settings_blob: dict) -> str:
         return "standard"
     except (KeyError, TypeError, ValueError):
         return "ppr"
+
+
+def parse_fan_leagues(fan: dict, season: int) -> list[dict]:
+    """The fantasy *football* leagues in an ESPN fan profile for ``season``,
+    falling back to the season before it (useful in the offseason).
+
+    Each fantasy team is a ``preferences`` item whose ``metaData.entry`` names
+    the game (``FFL``), the season, the team (``entryId``) and its league
+    (``groups[0]``)."""
+    found: list[dict] = []
+    for pref in (fan or {}).get("preferences") or []:
+        entry = ((pref or {}).get("metaData") or {}).get("entry") or {}
+        if (
+            entry.get("gameId") != ESPN_FOOTBALL_GAME_ID
+            and str(entry.get("abbrev") or "").upper() != ESPN_FOOTBALL_ABBREV
+        ):
+            continue
+        group = next(iter(entry.get("groups") or []), None) or {}
+        try:
+            league_id = str(int(group["groupId"]))
+            entry_season = int(entry["seasonId"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        meta = entry.get("entryMetadata") or {}
+        team_id = entry.get("entryId")
+        found.append(
+            {
+                "league_id": league_id,
+                "season": entry_season,
+                "name": group.get("groupName") or "ESPN league",
+                "team_id": str(team_id) if team_id is not None else None,
+                "team_name": meta.get("teamName"),
+                "total_teams": group.get("groupSize"),
+            }
+        )
+    for wanted in (season, season - 1):
+        leagues = [lg for lg in found if lg["season"] == wanted]
+        if leagues:
+            return leagues
+    return []
+
+
+async def discover_espn_leagues(
+    swid: str, espn_s2: str | None, season: int, timeout: float = 20.0
+) -> list[dict]:
+    """The user's ESPN fantasy football leagues, so they can pick one instead
+    of digging a league ID out of a URL. Raises ``httpx.HTTPError`` if ESPN
+    can't be reached or refuses."""
+    swid = normalize_swid(swid) or ""
+    cookies = {"SWID": swid}
+    if espn_s2:
+        cookies["espn_s2"] = espn_s2
+    async with httpx.AsyncClient(timeout=timeout, cookies=cookies) as client:
+        resp = await client.get(
+            f"{FAN_URL}/{quote(swid, safe='')}",
+            params={"displayHiddenPrefs": "true", "context": "fantasy"},
+        )
+        resp.raise_for_status()
+        return parse_fan_leagues(resp.json(), season)

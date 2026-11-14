@@ -51,9 +51,14 @@ below is free-tier-friendly.
    |---|---|
    | `NEXT_PUBLIC_API_URL` | the backend URL from step 1 |
    | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | optional — same Client ID as the backend |
+   | `NEXT_PUBLIC_ESPN_EXTENSION_URL` | optional — store listing of the ESPN connect extension; blank offers the bundled zip |
 
 3. Deploy. Then set the backend's `CORS_ORIGINS` to the resulting Vercel URL and
    redeploy the backend.
+4. The ESPN connect extension only talks to the sites named in
+   `extension/manifest.json`. If your URL isn't
+   `https://fantasy-football-ai-theta.vercel.app`, add it there and rebuild the
+   zip — see [`extension/README.md`](../extension/README.md).
 
 ## Local full stack (Docker)
 

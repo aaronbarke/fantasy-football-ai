@@ -6,7 +6,12 @@ import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import InjuryBadge from "@/components/InjuryBadge";
 import PlayerAvatar from "@/components/PlayerAvatar";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
+import {
+  detectEspnExtension,
+  requestEspnCookies,
+  type EspnRefreshedLeague,
+} from "@/lib/espn";
 import type { Matchup, Roster, StandingsEntry } from "@/lib/types";
 import { useLeague } from "@/hooks/useLeague";
 import { formatRecord, positionColor, timeAgo } from "@/lib/utils";
@@ -149,11 +154,19 @@ export default function DashboardPage() {
 
   async function claimTeam(teamId: string) {
     if (!league || !teamId) return;
-    await api(`/api/leagues/${league.id}/claim-team`, {
-      method: "POST",
-      body: JSON.stringify({ team_id: teamId }),
-    });
-    window.location.reload();
+    setSyncError(null);
+    try {
+      await api(`/api/leagues/${league.id}/claim-team`, {
+        method: "POST",
+        body: JSON.stringify({ team_id: teamId }),
+      });
+      window.location.reload();
+    } catch (err) {
+      setSyncError({
+        message: err instanceof Error ? err.message : "Couldn't save your team.",
+        reconnect: false,
+      });
+    }
   }
 
   async function syncNow() {
@@ -168,7 +181,45 @@ export default function DashboardPage() {
       setSyncError({
         message,
         // ESPN private leagues: expired cookies are fixed by reconnecting.
-        reconnect: league.platform === "espn" && /refused access|cookies/i.test(message),
+        reconnect: league.platform === "espn" && /refused access|sign-in|cookies/i.test(message),
+      });
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  /** One-click repair for an expired ESPN sign-in: the FFAI Connect extension
+   * supplies fresh cookies, which replace the stored ones on every ESPN league
+   * under this account. Without the extension, go re-enter them on Connect. */
+  async function reconnectEspn() {
+    if (!league) return;
+    if (!(await detectEspnExtension())) {
+      router.push("/connect?platform=espn");
+      return;
+    }
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      const cookies = await requestEspnCookies();
+      const result = await api<{ leagues: EspnRefreshedLeague[] }>(
+        "/api/leagues/espn/credentials",
+        { method: "POST", body: JSON.stringify(cookies) },
+      );
+      const mine = result.leagues.find((lg) => lg.id === league.id);
+      if (mine?.ok) {
+        window.location.reload();
+        return;
+      }
+      setSyncError({
+        message:
+          mine?.detail ??
+          "This league is connected through a different ESPN account. Sign in to that account on espn.com, then try again.",
+        reconnect: true,
+      });
+    } catch (err) {
+      setSyncError({
+        message: err instanceof Error ? err.message : "Couldn't reconnect ESPN.",
+        reconnect: true,
       });
     } finally {
       setSyncing(false);
@@ -177,9 +228,16 @@ export default function DashboardPage() {
 
   async function refreshStats() {
     setRefreshingStats(true);
+    setSyncError(null);
     try {
       await api(`/api/admin/refresh-stats`, { method: "POST" });
       window.location.reload();
+    } catch (err) {
+      // Admin-only in production: say so instead of silently doing nothing.
+      setSyncError({
+        message: err instanceof Error ? err.message : "Couldn't refresh stats.",
+        reconnect: false,
+      });
     } finally {
       setRefreshingStats(false);
     }
@@ -252,9 +310,14 @@ export default function DashboardPage() {
                 {syncError.reconnect && (
                   <>
                     {" "}
-                    <Link href="/connect" className="font-semibold underline">
-                      Re-enter your ESPN cookies
-                    </Link>
+                    <button
+                      type="button"
+                      onClick={reconnectEspn}
+                      disabled={syncing}
+                      className="font-semibold underline"
+                    >
+                      Reconnect ESPN
+                    </button>
                   </>
                 )}
               </p>

@@ -23,8 +23,9 @@ one-click **Demo login** on the sign-in page skips signup and lands on a fully s
   classification → typed context assembly → structured prompting, with a
   `context_snapshot` audit trail of exactly what the model saw. No hallucinated
   stats.
-- **Real integrations.** Live sync with Sleeper + ESPN league APIs (including
-  private-league cookie auth), nflverse parquet stats, Open-Meteo weather, and
+- **Real integrations.** Live sync with Sleeper + ESPN league APIs (private
+  ESPN leagues connect in one click through a small
+  [browser extension](extension/README.md)), nflverse parquet stats, Open-Meteo weather, and
   The Odds API for a working sportsbook **arbitrage detector**.
 - **Production-shaped.** 43 backend unit tests, CI on every push
   (ruff + pytest + frontend typecheck/lint), production-hardened boot checks
@@ -135,7 +136,7 @@ Over Replacement, so it's comparable across positions and behaves like a market:
 | Source | Data |
 |---|---|
 | Sleeper API | Leagues, rosters, matchups, trending adds, full player DB |
-| ESPN Fantasy API | ESPN league rosters (cookie auth for private leagues) |
+| ESPN Fantasy API | ESPN league rosters (private leagues via the [FFAI Connect extension](extension/README.md), or cookies pasted by hand) |
 | nflverse (parquet via httpx) | Weekly stats, target share, ID crosswalk |
 | Sleeper projections | Weekly per-player projections (blended into ours) |
 | ESPN public API | Injury reports |

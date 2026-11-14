@@ -97,7 +97,11 @@ _RATE_RULES = [
         60,
     ),
     # Anything that makes us call Sleeper/ESPN on the caller's behalf
-    (re.compile(r"/api/leagues/(connect|sleeper/lookup|[^/]+/sync)"), 10, 60),
+    (
+        re.compile(r"/api/leagues/(connect|sleeper/lookup|espn/lookup|espn/credentials|[^/]+/sync)"),
+        10,
+        60,
+    ),
     (re.compile(r"/api/mock/?$"), 20, 60),  # starting a mock simulates a whole room
     (re.compile(r"/api/"), 300, 60),  # everything else
 ]
