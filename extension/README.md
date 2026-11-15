@@ -49,20 +49,25 @@ somewhere other than `https://fantasy-football-ai-theta.vercel.app`:
 3. Run `./package.sh` to rebuild `frontend/public/ffai-espn-connect.zip`, and
    reload the extension.
 
-`http://localhost` and `http://127.0.0.1` (any port) are already included for
-local development.
+`http://localhost` and `http://127.0.0.1` (any port) are included when you
+load this folder unpacked, for local development. `package.sh` leaves them out
+of the zip, so the published extension only runs on the live site.
 
 ## Publishing to the Chrome Web Store
 
 Loading unpacked is fine for you; for other people, a store listing is the
-one-click install.
+one-click install. Everything the submission form asks for is in
+[`store/LISTING.md`](store/LISTING.md): the description, the permission
+justifications, the privacy answers and notes for the reviewer. The
+screenshots and promo tile are next to it in `store/`.
+
+In short:
 
 1. Register as a Chrome Web Store developer (one-time fee) and upload
    `frontend/public/ffai-espn-connect.zip`.
-2. In the listing, justify the permissions: `cookies` and
-   `https://*.espn.com/*` are used to read the two ESPN session cookies named
-   above so the user can connect their own league.
-3. Once it's live, set `NEXT_PUBLIC_ESPN_EXTENSION_URL` to the listing's
+2. Fill in the form from `store/LISTING.md`. The privacy policy it points to
+   is the site's `/privacy` page.
+3. Once it's approved, set `NEXT_PUBLIC_ESPN_EXTENSION_URL` to the listing's
    address in the frontend's environment. The Connect page then links there
    instead of offering the zip.
 
@@ -74,6 +79,7 @@ one-click install.
 | `background.js` | Reads the two ESPN cookies when asked by this extension's own scripts |
 | `content.js` | Bridge between the Fantasy Football AI page and the worker |
 | `popup.html`, `popup.js` | Toolbar popup: ESPN sign-in status and a link to the app |
-| `package.sh` | Builds the downloadable zip |
+| `package.sh` | Builds the zip for download and for the store (live site only, no localhost) |
+| `store/` | Chrome Web Store listing text, screenshots and promo tile |
 
 The page side of the conversation is in `frontend/src/lib/espn.ts`.

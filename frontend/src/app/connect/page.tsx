@@ -344,15 +344,21 @@ export default function ConnectPage() {
                     ESPN signs you out, one click fixes every league.
                   </p>
                   {ESPN_EXTENSION_STORE_URL ? (
+                    <>
                     <a
                       href={ESPN_EXTENSION_STORE_URL}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="button-primary mt-4 w-full"
                     >
-                      Get the extension
+                      Add the extension
                       <ArrowRight className="h-4 w-4" />
                     </a>
+                    <p className="mt-2 text-xs leading-5 text-gray-500">
+                      Free on the Chrome Web Store. Works in Chrome, Edge,
+                      Brave and Arc on a computer.
+                    </p>
+                    </>
                   ) : (
                     <>
                       <a
@@ -561,8 +567,13 @@ export default function ConnectPage() {
         </div>
         <p className="mt-6 flex items-start justify-center gap-2 text-xs leading-6 text-gray-500">
           <ShieldCheck className="mt-1 h-4 w-4 shrink-0" />
-          Connecting imports league data. Lineup changes stay on your fantasy
-          platform.
+          <span>
+            Connecting imports league data. Lineup changes stay on your fantasy
+            platform.{" "}
+            <Link href="/privacy" className="font-semibold text-accent-ink hover:underline">
+              Privacy
+            </Link>
+          </span>
         </p>
         <Link
           href="/draft"
