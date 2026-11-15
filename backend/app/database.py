@@ -25,6 +25,7 @@ ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("projection_snapshots", "calibration_adj", "FLOAT"),
     ("matchup_odds", "player_points", "JSONB"),
     ("matchup_odds", "changes", "JSONB"),
+    ("matchup_odds", "player_proj", "JSONB"),
 ]
 
 

@@ -20,7 +20,14 @@ from app.models import (
     Player,
     Roster,
 )
-from app.services.odds_timeline import player_changes, starter_points, week_started
+from app.services.nfl_plays_service import live_remaining
+from app.services.odds_timeline import (
+    news_changes,
+    player_changes,
+    starter_points,
+    starter_projections,
+    week_started,
+)
 from app.services.projection_service import compute_projections, win_probability
 from app.services.schedule_service import current_nfl_week
 
@@ -145,6 +152,7 @@ async def _player_cards(
                 "injury_status": p.injury_status,
                 "bye": bool(proj.get("bye")),
                 "projected": projected,
+                "stdev": proj.get("stdev"),
                 "floor": proj.get("floor"),
                 "ceiling": proj.get("ceiling"),
                 "confidence": proj.get("confidence"),
@@ -282,6 +290,7 @@ async def _matchup_team(
     live: bool,
     optimal: bool,
     live_scores: dict[str, float],
+    progress: dict[str, float] | None = None,
 ) -> dict:
     """Full display lineup, bench (with projections), and both a pre-game
     projected total and a LIVE expected total for one roster.
@@ -296,6 +305,8 @@ async def _matchup_team(
     banks everything scored so far, so each starter adds only the share of his
     projection still to be played — all of it before kickoff, a shrinking share
     while his game is on, none once it's final. Variance shrinks the same way.
+    ``progress`` (team → share of the game left, from ESPN's game clock) beats
+    the wall-clock estimate when it's known: overtime and long games included.
     Before the week (or with no kickoff times) this is the pure projection."""
     scoring = conn.scoring_type or "ppr"
     proj = await compute_projections(db, list(roster.players), conn.season, scoring)
@@ -327,11 +338,13 @@ async def _matchup_team(
         sigma = (proj.get(p["id"]) or {}).get("stdev") or 0.0
         proj_total += pts
         proj_var += sigma**2
-        left = (
-            _remaining_fraction(kickoffs.get((p.get("team") or "").upper()), now)
-            if use_live
-            else 1.0
-        )
+        team = (p.get("team") or "").upper()
+        if not use_live:
+            left = 1.0
+        elif progress and team in progress:
+            left = progress[team]
+        else:
+            left = _remaining_fraction(kickoffs.get(team), now)
         remaining += pts * left
         remaining_var += (sigma**2) * left
 
@@ -402,6 +415,7 @@ async def build_matchup_preview(
     *,
     now: datetime | None = None,
     record_from_kickoff: bool = False,
+    record: bool = True,
 ) -> dict:
     """Head-to-head scouting report: both lineups aligned slot by slot (the
     league's real lineup, K/DEF included), current + projected scores, each
@@ -410,7 +424,8 @@ async def build_matchup_preview(
 
     A live matchup's odds are snapshotted for the history chart. The scheduler's
     live-odds job passes ``record_from_kickoff`` so the first snapshot lands at
-    the week's first kickoff, before anyone has scored — the chart's start."""
+    the week's first kickoff, before anyone has scored — the chart's start.
+    ``record=False`` computes without writing (the chart rebuild uses it)."""
     if not conn.team_id:
         return {"status": "no_team"}
 
@@ -464,11 +479,14 @@ async def build_matchup_preview(
     ).all()
     live_scores = {pid: float(pts) for pid, pts in live_score_rows}
 
+    # How much of each game is left, by the game clock (live games only).
+    progress = await live_remaining(conn.season, m.week) if live else {}
+
     all_slots = _all_lineup_slots(conn)
     # Your side: the optimal lineup (what you should start). Opponent: what they
     # actually set — you're stuck playing whoever they benched or started.
-    user = await _matchup_team(db, conn, all_slots, user_roster, user_points, kickoffs, now, live, True, live_scores)
-    opp = await _matchup_team(db, conn, all_slots, opp_roster, opp_points, kickoffs, now, live, False, live_scores)
+    user = await _matchup_team(db, conn, all_slots, user_roster, user_points, kickoffs, now, live, True, live_scores, progress)
+    opp = await _matchup_team(db, conn, all_slots, opp_roster, opp_points, kickoffs, now, live, False, live_scores, progress)
 
     # Both lineups are built from the same slot list, so they align index-for-index
     rows = []
@@ -490,7 +508,7 @@ async def build_matchup_preview(
     )
 
     # Snapshot the live odds so the page can chart how they moved during games.
-    if live or (record_from_kickoff and week_started(kickoffs, now)):
+    if record and (live or (record_from_kickoff and week_started(kickoffs, now))):
         await _record_odds_snapshot(
             db, conn, m.week, win_prob, user_points, opp_points, rows, now
         )
@@ -537,7 +555,9 @@ async def _record_odds_snapshot(
     ):
         return
     points, meta = starter_points(rows)
+    projs = starter_projections(rows)
     changes = player_changes(last.player_points if last is not None else None, points, meta)
+    changes += news_changes(last.player_proj if last is not None else None, projs, meta)
     db.add(
         MatchupOdds(
             connection_id=conn.id,
@@ -547,6 +567,7 @@ async def _record_odds_snapshot(
             user_points=up,
             opp_points=op,
             player_points=points,
+            player_proj=projs,
             changes=changes,
         )
     )
