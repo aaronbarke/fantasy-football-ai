@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>FFAI Connect for ESPN</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --ink: #14161f;
+        --muted: #5b6072;
+        --line: #e3e5ee;
+        --accent: #2440aa;
+        --bg: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ink: #eef0f8;
+          --muted: #a2a8bd;
+          --line: #2a2e3f;
+          --accent: #a5b8ff;
+          --bg: #14161f;
+        }
+      }
+      body {
+        margin: 0;
+        width: 280px;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--ink);
+        font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+      p {
+        margin: 0 0 12px;
+        color: var(--muted);
+      }
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        font-weight: 600;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #9aa0b4;
+      }
+      .dot.on {
+        background: #1f9d55;
+      }
+      .dot.off {
+        background: #d97706;
+      }
+      button {
+        width: 100%;
+        padding: 9px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.primary {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      button + button {
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>FFAI Connect for ESPN</h1>
+    <div class="status">
+      <span id="dot" class="dot"></span>
+      <span id="status">Checking ESPN…</span>
+    </div>
+    <p id="hint"></p>
+    <button id="open-app" class="primary">Open Fantasy Football AI</button>
+    <button id="open-espn" hidden>Sign in to ESPN</button>
+    <script src="popup.js"></script>
+  </body>
+</html>

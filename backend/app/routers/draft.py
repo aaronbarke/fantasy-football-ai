@@ -238,9 +238,10 @@ async def live_draft(
             roster_positions=conn.roster_positions,
         )
         my_slot = 5
-        state = await espn_live_draft_state(db, conn)
-        if state.get("your_slot"):
-            my_slot = state["your_slot"]
+        if conn.platform == "espn":  # a Sleeper league id means nothing to ESPN
+            state = await espn_live_draft_state(db, conn)
+            if state.get("your_slot"):
+                my_slot = state["your_slot"]
         late = await late_round_board(db, season, scoring)
         return build_demo_state(
             board, teams, rounds, my_slot, demo_picks, late, conn.roster_positions

@@ -16,6 +16,7 @@ from app.models import ChatMessage, LeagueConnection, Recommendation, User
 from app.schemas.chat import ChatHistoryMessage, ChatRequest, ChatResponse
 from app.services.ai_service import generate_response, stream_response
 from app.services.context_builder import build_context
+from app.services.schedule_service import current_nfl_week
 from app.services.sleeper_service import SleeperClient
 from app.utils.security import ai_quota, get_current_user, is_demo
 
@@ -181,21 +182,28 @@ async def _store_turn(
             (p for p in players if p.get("id") != (picked or {}).get("id")), None
         )
         if picked and alternative and picked.get("id") and alternative.get("id"):
-            week = 1
-            try:
-                client = SleeperClient()
+            season = conn.season if conn else get_settings().current_season
+            # The week the projections behind this call were for: the schedule's
+            # current week. Sleeper's clock rolls over a day or so later, which
+            # filed a Tuesday-morning call under the week that had just ended —
+            # and graded it against games already played.
+            week = await current_nfl_week(db, season)
+            if week is None:
+                week = 1
                 try:
-                    state = await client.get_nfl_state()
-                    week = int(state.get("week") or 1)
-                finally:
-                    await client.close()
-            except Exception:
-                logger.warning("Could not fetch NFL week for recommendation tracking")
+                    client = SleeperClient()
+                    try:
+                        state = await client.get_nfl_state()
+                        week = int(state.get("week") or 1)
+                    finally:
+                        await client.close()
+                except Exception:
+                    logger.warning("Could not fetch NFL week for recommendation tracking")
             db.add(
                 Recommendation(
                     user_id=user.id,
                     connection_id=conn.id if conn else None,
-                    season=conn.season if conn else get_settings().current_season,
+                    season=season,
                     week=week,
                     picked_player_id=picked["id"],
                     alternative_player_id=alternative["id"],

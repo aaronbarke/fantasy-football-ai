@@ -1,11 +1,16 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.services.espn_service import normalize_swid
 
 # These values are spliced into Sleeper/ESPN request paths and cookies, so they
 # are held to the shapes those platforms actually use.
 NUMERIC_ID = r"^\d{1,32}$"
+# Cookie values: no whitespace, separators or quotes (they'd break the header)
+ESPN_S2 = r'^[^\s;,"\\]+$'
+SWID = r"^\{?[0-9A-Fa-f-]{32,40}\}?$"
 
 
 class SleeperLookupRequest(BaseModel):
@@ -35,10 +40,59 @@ class ConnectLeagueRequest(BaseModel):
     league_id: str = Field(pattern=NUMERIC_ID)
     season: int = Field(ge=2000, le=2100)
     platform_user_id: str | None = Field(default=None, pattern=NUMERIC_ID)  # sleeper user_id
-    # Cookie values: no whitespace, separators or quotes (they'd break the header)
-    espn_s2: str | None = Field(default=None, max_length=2048, pattern=r'^[^\s;,"\\]+$')
-    swid: str | None = Field(default=None, pattern=r"^\{?[0-9A-Fa-f-]{32,40}\}?$")
+    espn_s2: str | None = Field(default=None, max_length=2048, pattern=ESPN_S2)
+    swid: str | None = Field(default=None, pattern=SWID)
     team_id: str | None = Field(default=None, pattern=r"^\d{1,10}$")  # ESPN team selection
+
+    _braced_swid = field_validator("swid")(normalize_swid)
+
+
+class EspnLookupRequest(BaseModel):
+    """ESPN session cookies, to list the leagues that account plays in. Only
+    the SWID is needed to find them; espn_s2 rides along when we have it."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    swid: str = Field(pattern=SWID)
+    espn_s2: str | None = Field(default=None, max_length=2048, pattern=ESPN_S2)
+
+    _braced_swid = field_validator("swid")(normalize_swid)
+
+
+class EspnLeagueOption(BaseModel):
+    league_id: str
+    name: str
+    season: int
+    team_id: str | None = None
+    team_name: str | None = None
+    total_teams: int | None = None
+    connected: bool = False  # already one of this user's leagues
+
+
+class EspnLookupResponse(BaseModel):
+    leagues: list[EspnLeagueOption]
+
+
+class EspnCredentialsRequest(BaseModel):
+    """Fresh ESPN session cookies for every private league already connected."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    espn_s2: str = Field(max_length=2048, pattern=ESPN_S2)
+    swid: str = Field(pattern=SWID)
+
+    _braced_swid = field_validator("swid")(normalize_swid)
+
+
+class EspnRefreshedLeague(BaseModel):
+    id: str
+    league_name: str | None
+    ok: bool
+    detail: str | None = None
+
+
+class EspnCredentialsResponse(BaseModel):
+    leagues: list[EspnRefreshedLeague]
 
 
 class LeagueConnectionResponse(BaseModel):

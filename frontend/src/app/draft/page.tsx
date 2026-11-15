@@ -214,17 +214,17 @@ function CookieExpiredBanner() {
       <AlertTriangle className="h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-red-800 dark:text-red-300">
-          ESPN rejected your login. Your cookies have expired
+          ESPN rejected your login. Your ESPN sign-in has expired
         </p>
         <p className="mt-0.5 text-xs text-red-700 dark:text-red-400">
-          Live sync can&apos;t read your draft until you reconnect with fresh
-          espn_s2 and SWID cookies. Picks won&apos;t auto-mark until then, but
-          you can keep drafting with the manual “My pick / Gone” buttons in the
-          meantime.
+          Live sync can&apos;t read your draft until you reconnect ESPN, one
+          click with the FFAI Connect extension. Picks won&apos;t auto-mark
+          until then, but you can keep drafting with the manual “My pick /
+          Gone” buttons in the meantime.
         </p>
       </div>
       <Link
-        href="/connect"
+        href="/connect?platform=espn"
         className="shrink-0 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700"
       >
         Reconnect league
