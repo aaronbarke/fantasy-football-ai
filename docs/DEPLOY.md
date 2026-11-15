@@ -52,6 +52,7 @@ below is free-tier-friendly.
    | `NEXT_PUBLIC_API_URL` | the backend URL from step 1 |
    | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | optional — same Client ID as the backend |
    | `NEXT_PUBLIC_ESPN_EXTENSION_URL` | optional — store listing of the ESPN connect extension; blank offers the bundled zip |
+   | `NEXT_PUBLIC_CONTACT_EMAIL` | optional — contact address shown on `/privacy`; blank links to GitHub issues |
 
 3. Deploy. Then set the backend's `CORS_ORIGINS` to the resulting Vercel URL and
    redeploy the backend.
