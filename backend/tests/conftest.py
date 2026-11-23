@@ -23,3 +23,15 @@ def _no_team_results_fetch(monkeypatch):
         return {}
 
     monkeypatch.setattr(projection_service, "get_external_passing", _no_passing)
+
+
+@pytest.fixture(autouse=True)
+def _no_espn_game_data(monkeypatch):
+    """Game clocks and play-by-play come from ESPN; tests run offline (no
+    data → the wall-clock live model) unless a test supplies plays."""
+    from app.services import nfl_plays_service
+
+    async def _none(url, params):
+        return None
+
+    monkeypatch.setattr(nfl_plays_service, "_fetch_json", _none)

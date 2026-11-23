@@ -14,9 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import MatchupOdds, NflSchedule
 from app.services.schedule_service import GAME_FINISHED_AFTER
 
-# A move of at least this much win probability (5 percentage points) between
-# two snapshots is a "swing": the chart marks it and names the players behind it.
-SWING_THRESHOLD = 0.05
+# A move of at least this much win probability (3 percentage points) is a
+# "swing": the chart marks it and names the play or players behind it.
+SWING_THRESHOLD = 0.03
 # Smaller point changes are rounding noise (and stat corrections of a tenth).
 _MIN_POINT_CHANGE = 0.05
 # A swing names at most this many players.
@@ -42,6 +42,64 @@ def starter_points(rows: list[dict]) -> tuple[dict[str, float], dict[str, dict]]
                 "side": side,
             }
     return points, meta
+
+
+def starter_projections(rows: list[dict]) -> dict[str, dict]:
+    """Each starter's projection, its spread and injury status as the app sees
+    it right now — saved with a snapshot so a later rebuild knows what the
+    app believed at that moment."""
+    out: dict[str, dict] = {}
+    for row in rows:
+        for side_key in ("user", "opponent"):
+            p = row.get(side_key)
+            if not p or not p.get("id"):
+                continue
+            out[str(p["id"])] = {
+                "proj": round(float(p.get("projected") or 0.0), 2),
+                "sd": round(float(p.get("stdev") or 0.0), 2),
+                "status": p.get("injury_status"),
+            }
+    return out
+
+
+# A projection move smaller than this between snapshots is drift, not news.
+NEWS_MIN_PROJ = 0.5
+
+
+def news_changes(
+    prev: dict[str, dict] | None,
+    cur: dict[str, dict],
+    meta: dict[str, dict],
+) -> list[dict]:
+    """Starters whose injury status or projection changed since the previous
+    snapshot ("Davante Adams → Injured Reserve, −16.6 proj")."""
+    if not prev:
+        return []
+    out = []
+    for pid, now_v in cur.items():
+        was = prev.get(pid)
+        if was is None:
+            continue
+        d = float(now_v.get("proj") or 0) - float(was.get("proj") or 0)
+        status_changed = (was.get("status") or "Active") != (now_v.get("status") or "Active")
+        if abs(d) < NEWS_MIN_PROJ and not status_changed:
+            continue
+        info = meta.get(pid, {})
+        out.append(
+            {
+                "id": pid,
+                "name": info.get("name") or pid,
+                "position": info.get("position"),
+                "side": info.get("side"),
+                "kind": "news",
+                "status": now_v.get("status") if status_changed else None,
+                "proj_delta": round(d, 2),
+                "delta": 0.0,
+                "points": None,
+            }
+        )
+    out.sort(key=lambda c: -abs(c["proj_delta"]))
+    return out
 
 
 def player_changes(
