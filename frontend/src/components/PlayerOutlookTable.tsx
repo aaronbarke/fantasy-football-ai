@@ -23,6 +23,9 @@ interface OutlookEntry {
   rank: number;
   games: number;
   vs_tough_ppg?: number | null;
+  own_ppg?: number;
+  external_ppg?: number | null;
+  games_played?: number;
   vs_tough_games?: number;
   cells: OutlookCell[];
 }
@@ -110,7 +113,7 @@ export default function PlayerOutlookTable({
                 title={
                   teamPos
                     ? "Projected points per game against a league-average opponent"
-                    : "Recent-weighted fantasy points per game, and where that ranks at the position"
+                    : "Talent rate: his own points per game blended with Sleeper’s projection (fewer games played → more Sleeper), and where that ranks at the position"
                 }
               >
                 {teamPos ? "Neutral pts/gm" : "Pts/gm"}
@@ -174,7 +177,17 @@ export default function PlayerOutlookTable({
                     )}
                   </div>
                 </td>
-                <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-gray-600">
+                <td
+                  className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-gray-600"
+                  title={
+                    e.own_ppg != null
+                      ? `His own: ${e.own_ppg}/gm over ${e.games_played} games` +
+                        (e.external_ppg != null
+                          ? ` · Sleeper projects ${e.external_ppg}/gm`
+                          : " · no Sleeper projection")
+                      : undefined
+                  }
+                >
                   {e.base_ppg}{" "}
                   <span className="text-xs text-gray-400">#{e.base_rank}</span>
                 </td>
@@ -235,7 +248,7 @@ export default function PlayerOutlookTable({
       <p className="mt-2 text-xs text-gray-400">
         {teamPos
           ? "Kickers follow their offense’s scoring and the opponent’s points allowed; defenses follow their own quality and the opposing offense."
-          : "Each game is 75% the player — his points per game (last 4 games count double; last season fades out after 8 games), or his own record against defenses that tough or soft — and 25% the matchup: how many points that defense allows to the position."}{" "}
+          : "Talent comes first: his own points per game (last 4 games count double) blended with Sleeper’s projection, leaning on Sleeper when he’s played few games. Each game is then 75% that talent (nudged by how he’s done against defenses that tough or soft) and 25% the matchup, so the schedule reorders players of similar talent. Hover a Pts/gm number for the breakdown."}{" "}
         Players on IR or PUP are left out. Based on {data.stats_season} data.
       </p>
     </>
