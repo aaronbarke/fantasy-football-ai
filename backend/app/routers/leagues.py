@@ -681,6 +681,24 @@ async def team_schedule_rankings(
     )
 
 
+@router.get("/{connection_id}/schedule-strength/players")
+async def player_schedule_outlook(
+    connection_id: str,
+    window: str = "playoffs",
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Players ranked per position by projected points over the window
+    (default: the fantasy playoffs) — talent crossed with schedule."""
+    from app.services.playoff_outlook_service import build_player_outlook
+
+    conn = await _get_user_connection(db, user, connection_id)
+    start, weeks_ahead = await _strength_window(db, conn, window)
+    return await build_player_outlook(
+        db, conn.season, start, weeks_ahead=weeks_ahead, scoring=conn.scoring_type
+    )
+
+
 @router.get("/{connection_id}/waivers", response_model=list[WaiverPlayer])
 async def get_waivers(
     connection_id: str,

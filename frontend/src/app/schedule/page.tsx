@@ -9,11 +9,8 @@ import PageHeader from "@/components/PageHeader";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import { positionColor } from "@/lib/utils";
-import TeamScheduleRankings, {
-  cellColor,
-  matchupTitle,
-  type MatchupCell,
-} from "@/components/TeamScheduleRankings";
+import TeamScheduleRankings from "@/components/TeamScheduleRankings";
+import { cellColor, matchupTitle, type MatchupCell } from "@/lib/schedule";
 
 interface StrengthPlayer {
   id: string;
