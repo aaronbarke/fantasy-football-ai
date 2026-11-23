@@ -53,6 +53,12 @@ function Move({ from, to }: { from: number; to: number }) {
 
 const INITIAL_ROWS = 50;
 
+/** Sleeper marks healthy players "Active"; only flag real designations. */
+function isInjured(status: string | null): boolean {
+  const s = (status ?? "").trim().toLowerCase();
+  return s !== "" && s !== "active" && s !== "healthy";
+}
+
 /** Players at one position ranked by projected points over the window:
  *  how good they are, crossed with who they face. */
 export default function PlayerOutlookTable({
@@ -154,7 +160,7 @@ export default function PlayerOutlookTable({
                       {e.name}
                     </span>
                     <span className="text-xs text-gray-400">{e.team}</span>
-                    {e.injury_status && (
+                    {isInjured(e.injury_status) && (
                       <span className="rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
                         {e.injury_status}
                       </span>
