@@ -10,7 +10,7 @@ from app.database import get_db
 from app.models import LeagueConnection, Player, Roster, User
 from app.services.ai_service import generate_response
 from app.services.context_builder import player_package
-from app.services.trade_finder_service import find_trades
+from app.services.trade_finder_service import SHAPES, find_trades
 from app.services.value_service import compute_player_values, side_total
 from app.utils.security import ai_quota, get_current_user
 
@@ -321,20 +321,33 @@ async def trade_finder(
     connection_id: str,
     target: str | None = None,
     shed: str | None = None,
+    shape: str | None = None,
+    horizon: str = "week",
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Auto-scan the league for roughly-even, win-win trades that upgrade the
     user's lineup. No prompt needed — deterministic and self-ranked. Optional
     ``target`` narrows to packages that bring back that position; ``shed``
-    narrows to packages that give that position away."""
+    narrows to packages that give that position away. ``shape`` ("1-1",
+    "2-1", "1-2", "2-2") limits the deal shape; ``horizon`` "playoffs" scores
+    lineups over the fantasy playoffs instead of season points per game."""
     conn = await _owned_connection(connection_id, user, db)
     if not conn.team_id:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "This league connection isn't linked to one of your teams yet.",
         )
+    if shape is not None and shape not in SHAPES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Shape must be one of {list(SHAPES)}")
+    if horizon not in ("week", "playoffs"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Horizon must be 'week' or 'playoffs'")
     trades = await find_trades(
-        db, conn, target=_valid_position(target), shed=_valid_position(shed)
+        db,
+        conn,
+        target=_valid_position(target),
+        shed=_valid_position(shed),
+        shape=shape,
+        horizon=horizon,
     )
     return TradeFinderResponse(trades=trades)

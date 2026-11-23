@@ -239,6 +239,10 @@ export default function TradePage() {
   const [finderError, setFinderError] = useState<string | null>(null);
   const [target, setTarget] = useState("");
   const [shed, setShed] = useState("");
+  const [shape, setShape] = useState("");
+  const [horizon, setHorizon] = useState<"week" | "playoffs">("week");
+  // The horizon the current results were scored with (labels follow it).
+  const [shownHorizon, setShownHorizon] = useState<"week" | "playoffs">("week");
 
   const allIds = [...give, ...receive].map((p) => p.id);
 
@@ -251,10 +255,13 @@ export default function TradePage() {
       const params = new URLSearchParams({ connection_id: league.id });
       if (target) params.set("target", target);
       if (shed) params.set("shed", shed);
+      if (shape) params.set("shape", shape);
+      params.set("horizon", horizon);
       const resp = await api<{ trades: FinderTrade[] }>(
         `/api/trade/finder?${params.toString()}`,
       );
       setFinderTrades(resp.trades);
+      setShownHorizon(horizon);
       setFinderRan(true);
     } catch (err) {
       setFinderError(err instanceof Error ? err.message : "Trade search failed");
@@ -317,6 +324,31 @@ export default function TradePage() {
                 Auto-scan the league for fair, win-win deals that upgrade your
                 lineup — no typing required.
               </p>
+              <div
+                className="mt-2 inline-flex rounded-lg border border-gray-200 p-0.5 dark:border-gray-800"
+                role="group"
+                aria-label="Score deals for"
+              >
+                {(
+                  [
+                    ["week", "Season form"],
+                    ["playoffs", "Fantasy playoffs (Wk 15–17)"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setHorizon(key)}
+                    aria-pressed={horizon === key}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                      horizon === key
+                        ? "bg-ink text-canvas"
+                        : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="flex flex-wrap items-end gap-2">
               <label className="flex flex-col text-xs text-gray-500">
@@ -345,6 +377,20 @@ export default function TradePage() {
                   ))}
                 </select>
               </label>
+              <label className="flex flex-col text-xs text-gray-500">
+                Deal type
+                <select
+                  value={shape}
+                  onChange={(e) => setShape(e.target.value)}
+                  className="mt-1 rounded-lg border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-700"
+                >
+                  <option value="">Any</option>
+                  <option value="1-1">1 for 1</option>
+                  <option value="2-1">2 for 1 (you give 2)</option>
+                  <option value="1-2">1 for 2 (you get 2)</option>
+                  <option value="2-2">2 for 2</option>
+                </select>
+              </label>
               <button
                 onClick={findTrades}
                 disabled={finding || !league}
@@ -360,8 +406,8 @@ export default function TradePage() {
           )}
           {finderRan && !finding && finderTrades.length === 0 && (
             <p className="mt-3 text-sm text-gray-500">
-              {target || shed
-                ? "No fair win-win deals match those positions. Try widening the filters or setting them to Any."
+              {target || shed || shape
+                ? "No fair win-win deals match those filters. Try widening them or setting them to Any."
                 : "No clean win-win trades right now — your roster looks balanced, or no partner lines up on value. Try the manual analyzer below."}
             </p>
           )}
@@ -380,6 +426,7 @@ export default function TradePage() {
                     </span>
                     <span className="font-semibold text-green-600">
                       +{t.your_lineup_gain} pts/wk
+                      {shownHorizon === "playoffs" ? " in playoffs" : ""}
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-medium">
