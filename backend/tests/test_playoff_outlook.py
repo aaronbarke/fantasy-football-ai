@@ -9,6 +9,8 @@ from app.services import playoff_outlook_service, projection_service
 from app.services.playoff_outlook_service import build_player_outlook
 
 SEASON = 2026
+# Sleeper projections by week for the test at hand; empty → our rate alone.
+EXTERNAL: dict[int, dict[str, float]] = {}
 
 
 @pytest.fixture
@@ -24,7 +26,12 @@ async def db(monkeypatch):
     async def no_results(seasons):
         return []
 
+    async def no_external(season, week, scoring="ppr"):
+        return EXTERNAL.get(week, {})
+
+    EXTERNAL.clear()
     monkeypatch.setattr(playoff_outlook_service, "ensure_schedule", no_sync)
+    monkeypatch.setattr(playoff_outlook_service, "get_external_projections", no_external)
     monkeypatch.setattr(projection_service, "get_team_results", no_results)
     async with Session() as session:
         yield session
@@ -123,3 +130,27 @@ async def test_last_season_fades_out_once_this_season_has_enough_games(db):
     r = await build_player_outlook(db, SEASON, 15, weeks_ahead=1)
     soph = r["positions"]["WR"][0]
     assert soph["base_ppg"] == 18.0  # rookie-year 5s no longer drag him down
+
+
+async def test_few_games_lean_on_sleeper_so_a_hot_part_timer_stays_below_a_starter(db):
+    db.add_all(
+        [
+            # Starter: 10 games at 14. Part-timer: 4 games at 18.
+            Player(id="starter", full_name="Proven Starter", position="WR", team="AAA"),
+            Player(id="hot", full_name="Hot Part-timer", position="WR", team="AAA"),
+            *_games("starter", "MID", 14.0, weeks=range(1, 11)),
+            *_games("hot", "MID", 18.0, weeks=range(7, 11)),
+            NflSchedule(season=SEASON, week=15, home_team="AAA", away_team="MID"),
+        ]
+    )
+    await db.commit()
+    EXTERNAL[15] = {"starter": 15.0, "hot": 9.0}
+
+    r = await build_player_outlook(db, SEASON, 15, weeks_ahead=1)
+    wrs = {e["id"]: e for e in r["positions"]["WR"]}
+    starter, hot = wrs["starter"], wrs["hot"]
+    # talent = (games × own + 5 × Sleeper) / (games + 5)
+    assert starter["base_ppg"] == pytest.approx((10 * 14 + 5 * 15) / 15, abs=0.05)
+    assert hot["base_ppg"] == pytest.approx((4 * 18 + 5 * 9) / 9, abs=0.05)
+    assert starter["rank"] < hot["rank"]
+    assert hot["own_ppg"] == 18.0 and hot["external_ppg"] == 9.0 and hot["games_played"] == 4

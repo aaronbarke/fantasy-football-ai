@@ -4,12 +4,17 @@ how good a player is, crossed with how hard his schedule is.
 A great player with a brutal schedule can still finish below a good player
 with a soft one. Each game in the window is projected as
 
-    PLAYER_WEIGHT  × what the player does (his recency-weighted scoring rate,
-                     or — against a tough or soft defense — his own record
-                     against defenses like that this season, shrunk toward
-                     his rate when the sample is small)
+    PLAYER_WEIGHT  × what the player does (his talent rate, or — against a
+                     tough or soft defense — his own record against defenses
+                     like that this season, shrunk toward that rate)
   + MATCHUP_WEIGHT × what the matchup says (his rate scaled by how many
                      points this opponent allows to his position vs average)
+
+His talent rate blends his own recency-weighted scoring with Sleeper's
+projections for the window, by sample size: a player with few games leans on
+Sleeper, so two big games from a part-timer can't vault him past a proven
+starter. Talent decides who's near the top; the schedule reorders players of
+similar talent.
 
 and players are ranked by the total. K and DEF use the kicker and DST models
 (own team quality plus the opponent)."""
@@ -20,6 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Player, PlayerStatsWeekly
+from app.services.external_proj_service import get_external_projections
 from app.services.opportunity_service import _is_absent
 from app.services.schedule_service import (
     REGULAR_SEASON_MAX_WEEK,
@@ -50,9 +56,12 @@ MATCHUP_WEIGHT = 0.25
 # 1-11 soft, 12-21 middle, 22-32 tough.
 SOFT_MAX_RANK = 11
 TOUGH_MIN_RANK = 22
-# A player's record against a tier is blended with this many games' worth of
-# his overall rate, so two big games against good defenses can't swing it.
-TIER_SHRINK_GAMES = 3.0
+# A player's over/under-performance against a tier is shrunk by this many
+# games, so two big games against good defenses can't swing it.
+TIER_SHRINK_GAMES = 4.0
+# Sleeper's projection counts as this many games of evidence in the talent
+# rate: at 10 games played our rate carries 2/3, at 4 games under half.
+EXTERNAL_PRIOR_GAMES = 5.0
 # Out for the long haul — not worth ranking for the playoffs.
 LONG_TERM_OUT = {"ir", "pup", "na", "dnr", "sus", "suspended", "cov"}
 
@@ -77,8 +86,24 @@ def _rank(entries: list[dict], key: str, out_key: str) -> None:
         e[out_key] = i
 
 
+async def _external_rates(season: int, weeks: list[int], scoring: str | None) -> dict[str, float]:
+    """player_id → Sleeper's average projected points per game over ``weeks``
+    (weeks it projects him for; a bye simply has no projection)."""
+    per_player: dict[str, list[float]] = defaultdict(list)
+    for wk in weeks:
+        try:
+            proj = await get_external_projections(season, wk, scoring or "ppr")
+        except Exception:  # noqa: BLE001 — Sleeper down → our rate alone
+            continue
+        for pid, pts in (proj or {}).items():
+            if pts is not None:
+                per_player[pid].append(float(pts))
+    return {pid: sum(v) / len(v) for pid, v in per_player.items() if v}
+
+
 async def _skill_outlook(
     db: AsyncSession,
+    season: int,
     stats_season: int,
     scoring: str | None,
     weeks: list[int],
@@ -139,6 +164,7 @@ async def _skill_outlook(
     )
 
     dvp = await defense_vs_position_ranks(db, stats_season, scoring or "ppr")
+    external = await _external_rates(season, weeks, scoring)
     league_avg: dict[str, float] = {}
     for pos in SKILL_POSITIONS:
         vals = [v["pts_allowed_avg"] for (_, p), v in dvp.items() if p == pos]
@@ -149,7 +175,15 @@ async def _skill_outlook(
         if p.position not in by_pos or _long_term_out(p.injury_status):
             continue
         s = samples[p.id]
-        base = sum(pts * w for pts, w in s) / sum(w for _, w in s)
+        own_rate = sum(pts * w for pts, w in s) / sum(w for _, w in s)
+        n_games = played_this_season[p.id]
+        ext = external.get(p.id)
+        if ext is not None:
+            base = (n_games * own_rate + EXTERNAL_PRIOR_GAMES * ext) / (
+                n_games + EXTERNAL_PRIOR_GAMES
+            )
+        else:
+            base = own_rate
         avg = league_avg.get(p.position) or 0.0
 
         # His own record against soft and tough defenses this season.
@@ -158,8 +192,13 @@ async def _skill_outlook(
             tier = _tier((dvp.get((opp, p.position)) or {}).get("rank"))
             if tier:
                 tier_pts[tier].append(pts)
+        # How much better or worse he does against that tier than his own
+        # average, shrunk by sample size and applied to his talent rate — so
+        # a few games can nudge him, never redefine him.
         tier_rate = {
-            t: (sum(v) + TIER_SHRINK_GAMES * base) / (len(v) + TIER_SHRINK_GAMES)
+            t: base + (len(v) / (len(v) + TIER_SHRINK_GAMES)) * (sum(v) / len(v) - own_rate)
+            if v
+            else base
             for t, v in tier_pts.items()
         }
 
@@ -184,6 +223,9 @@ async def _skill_outlook(
                 }
             )
         entry = _entry(p.id, p.full_name, p.team, p.injury_status, base, cells)
+        entry["own_ppg"] = round(own_rate, 1)
+        entry["external_ppg"] = round(ext, 1) if ext is not None else None
+        entry["games_played"] = n_games
         tough = tier_pts["tough"]
         entry["vs_tough_ppg"] = round(sum(tough) / len(tough), 1) if tough else None
         entry["vs_tough_games"] = len(tough)
@@ -304,7 +346,7 @@ async def build_player_outlook(
     weeks = _window_weeks(start_week, weeks_ahead)
     games = await _games_by_team_week(db, season, weeks)
 
-    positions = await _skill_outlook(db, stats_season, scoring, weeks, games)
+    positions = await _skill_outlook(db, season, stats_season, scoring, weeks, games)
     positions.update(await _team_position_outlook(db, season, stats_season, weeks, games))
 
     for position, entries in positions.items():
