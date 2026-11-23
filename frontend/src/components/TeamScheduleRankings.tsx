@@ -5,14 +5,12 @@ import { useQuery } from "@tanstack/react-query";
 import { LoadingState, ErrorState } from "@/components/PageState";
 import { api } from "@/lib/api";
 import { positionColor } from "@/lib/utils";
-
-export interface MatchupCell {
-  week: number;
-  opponent: string | null;
-  home?: boolean;
-  rank: number | null;
-  pts_allowed_avg?: number | null;
-}
+import {
+  cellColor,
+  matchupTitle,
+  type MatchupCell,
+} from "@/lib/schedule";
+import PlayerOutlookTable from "@/components/PlayerOutlookTable";
 
 interface TeamEntry {
   team: string;
@@ -31,30 +29,6 @@ interface TeamRankingsData {
 
 export const POSITIONS = ["QB", "RB", "WR", "TE", "K", "DEF"] as const;
 
-export function cellColor(rank: number | null): string {
-  // Green/gray pick up their dark-mode tints from the global remap layer; the
-  // warm tiers need explicit dark variants or they glow cream on the dark theme.
-  if (rank == null) return "bg-gray-100 text-gray-400";
-  if (rank <= 8) return "bg-green-100 text-green-800";
-  if (rank <= 16) return "bg-green-50 text-green-700";
-  if (rank <= 24)
-    return "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300";
-  return "bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300";
-}
-
-/** Hover text explaining what a matchup cell's rank means for a position. */
-export function matchupTitle(
-  position: string | null,
-  c: MatchupCell,
-): string | undefined {
-  if (c.pts_allowed_avg == null || !c.opponent) return undefined;
-  if (position === "DEF")
-    return `Defenses average ~${c.pts_allowed_avg} fantasy pts vs ${c.opponent}'s offense (rank ${c.rank}/32)`;
-  if (position === "K")
-    return `${c.opponent} allows ${c.pts_allowed_avg} points/gm (rank ${c.rank}/32 for kickers)`;
-  return `${c.opponent} allows ${c.pts_allowed_avg} fantasy pts/gm to ${position}s (rank ${c.rank}/32)`;
-}
-
 const VALUE_LABEL: Record<string, string> = {
   DEF: "Avg DST pts",
   K: "Opp pts allowed",
@@ -68,9 +42,15 @@ export default function TeamScheduleRankings({
   leagueId: string;
   window: "upcoming" | "playoffs";
   /** The user's roster, to flag which teams they have a stake in. */
-  myPlayers: { name: string; position: string | null; team: string | null }[];
+  myPlayers: {
+    id: string;
+    name: string;
+    position: string | null;
+    team: string | null;
+  }[];
 }) {
   const [position, setPosition] = useState<string>("RB");
+  const [view, setView] = useState<"players" | "teams">("players");
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["team-schedule-rankings", leagueId, window],
@@ -78,6 +58,7 @@ export default function TeamScheduleRankings({
       api<TeamRankingsData>(
         `/api/leagues/${leagueId}/schedule-strength/teams?window=${window}`,
       ),
+    enabled: view === "teams",
     retry: false,
     staleTime: 30 * 60_000,
   });
@@ -89,13 +70,40 @@ export default function TeamScheduleRankings({
   return (
     <section className="mt-12" aria-labelledby="team-rankings-heading">
       <h2 id="team-rankings-heading" className="text-lg font-semibold">
-        Easiest schedules by position
+        {window === "playoffs" ? "Fantasy playoff rankings" : "Rest-of-season rankings"}{" "}
+        by position
       </h2>
       <p className="mt-1 text-sm text-gray-500">
-        Every NFL team ranked by how soft its{" "}
-        {window === "playoffs" ? "fantasy playoff (Wk 15–17)" : "upcoming"}{" "}
-        schedule is for the position. #1 is the easiest.
+        {view === "players"
+          ? `Players ranked by projected points over ${
+              window === "playoffs" ? "the fantasy playoffs (Wk 15–17)" : "the next six weeks"
+            }: how good they are, crossed with who they face. A great player with a tough schedule can slide; a good one with a soft schedule can climb.`
+          : `Every NFL team ranked by how soft its ${
+              window === "playoffs" ? "fantasy playoff (Wk 15–17)" : "upcoming"
+            } schedule is for the position. #1 is the easiest.`}
       </p>
+
+      <div className="mt-4 inline-flex rounded-lg border border-gray-200 p-0.5 dark:border-gray-800">
+        {(
+          [
+            ["players", "Players"],
+            ["teams", "Team schedules"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setView(key)}
+            aria-pressed={view === key}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+              view === key
+                ? "bg-ink text-canvas"
+                : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       <div
         className="mt-4 flex flex-wrap gap-1.5"
@@ -118,15 +126,26 @@ export default function TeamScheduleRankings({
         ))}
       </div>
 
-      {isLoading && <LoadingState label="Ranking every team’s schedule…" />}
-      {error ? (
+      {view === "players" && (
+        <PlayerOutlookTable
+          leagueId={leagueId}
+          window={window}
+          position={position}
+          myPlayerIds={new Set(myPlayers.map((p) => p.id))}
+        />
+      )}
+
+      {view === "teams" && isLoading && (
+        <LoadingState label="Ranking every team’s schedule…" />
+      )}
+      {view === "teams" && error ? (
         <ErrorState
           message="We couldn’t load the team rankings. Try again."
           retry={() => void refetch()}
         />
       ) : null}
 
-      {data && (
+      {view === "teams" && data && (
         <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table className="w-full text-sm">
             <thead>
@@ -205,7 +224,7 @@ export default function TeamScheduleRankings({
           </table>
         </div>
       )}
-      {data && (
+      {view === "teams" && data && (
         <p className="mt-2 text-xs text-gray-400">
           Based on {data.stats_season} matchup data. Hover a cell for details.
         </p>
