@@ -22,8 +22,12 @@ CACHE_TTL = 3 * 3600  # finals land a few times a week; this is plenty fresh
 _TEAM_FIX = {"LA": "LAR", "STL": "LAR", "SD": "LAC", "OAK": "LV", "WSH": "WAS"}
 
 
-def _team(code: str) -> str:
+def normalize_team(code: str) -> str:
+    """nflverse team code → ours (e.g. the Rams are "LA" there, "LAR" here)."""
     return _TEAM_FIX.get(code, code)
+
+
+_team = normalize_team
 
 
 def parse_games_csv(text: str, seasons: set[int]) -> list[dict]:

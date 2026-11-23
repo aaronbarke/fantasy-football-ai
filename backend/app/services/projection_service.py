@@ -64,7 +64,7 @@ from app.services.schedule_service import (
     defense_vs_position_ranks,
     points_column,
 )
-from app.services.team_stats_service import get_team_results
+from app.services.team_stats_service import get_team_results, normalize_team
 from app.utils.constants import STADIUMS
 
 PRIOR_SEASON_WEIGHT = 0.5
@@ -1080,7 +1080,9 @@ async def _team_form(db: AsyncSession, season: int) -> dict[str, dict]:
             .group_by(PlayerStatsWeekly.season, PlayerStatsWeekly.week, PlayerStatsWeekly.opponent)
         )
     ).all()
-    forced = {(s, w, team): float(n or 0) for s, w, team, n in int_rows}
+    forced: dict[tuple, float] = defaultdict(float)
+    for s, w, team, n in int_rows:
+        forced[(s, w, normalize_team(team))] += float(n or 0)
 
     acc: dict[str, dict[str, float]] = defaultdict(
         lambda: {"pf": 0.0, "pa": 0.0, "games": 0.0, "def_int": 0.0, "off_int": 0.0, "int_games": 0.0}

@@ -604,6 +604,28 @@ FANTASY_PLAYOFF_START = 15
 FANTASY_PLAYOFF_WEEKS = 3
 
 
+async def _strength_window(db: AsyncSession, conn, window: str) -> tuple[int, int]:
+    """(start week, number of weeks) for a schedule-strength window."""
+    if window == "playoffs":
+        return FANTASY_PLAYOFF_START, FANTASY_PLAYOFF_WEEKS
+
+    # The schedule's week is the app's one definition of "this week"; Sleeper's
+    # clock is only a fallback for when no schedule is loaded.
+    week = await current_nfl_week(db, conn.season)
+    if week is None:
+        week = 1
+        try:
+            client = SleeperClient()
+            try:
+                state = await client.get_nfl_state()
+                week = int(state.get("week") or 1)
+            finally:
+                await client.close()
+        except Exception:
+            pass
+    return max(week, 1), 6
+
+
 @router.get("/{connection_id}/schedule-strength")
 async def schedule_strength(
     connection_id: str,
@@ -630,32 +652,32 @@ async def schedule_strength(
     if roster is None or not roster.players:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No roster — sync the league first")
 
-    if window == "playoffs":
-        return await build_schedule_strength(
-            db,
-            conn.season,
-            FANTASY_PLAYOFF_START,
-            list(roster.players),
-            weeks_ahead=FANTASY_PLAYOFF_WEEKS,
-        )
-
-    # The schedule's week is the app's one definition of "this week"; Sleeper's
-    # clock is only a fallback for when no schedule is loaded.
-    week = await current_nfl_week(db, conn.season)
-    if week is None:
-        week = 1
-        try:
-            client = SleeperClient()
-            try:
-                state = await client.get_nfl_state()
-                week = int(state.get("week") or 1)
-            finally:
-                await client.close()
-        except Exception:
-            pass
-
+    start, weeks_ahead = await _strength_window(db, conn, window)
     return await build_schedule_strength(
-        db, conn.season, max(week, 1), list(roster.players)
+        db,
+        conn.season,
+        start,
+        list(roster.players),
+        weeks_ahead=weeks_ahead,
+        scoring=conn.scoring_type,
+    )
+
+
+@router.get("/{connection_id}/schedule-strength/teams")
+async def team_schedule_rankings(
+    connection_id: str,
+    window: str = "upcoming",
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every NFL team's schedule over the window, ranked per position (QB, RB,
+    WR, TE, K, DEF) in the league's scoring format. Rank 1 = easiest."""
+    from app.services.schedule_service import build_team_schedule_rankings
+
+    conn = await _get_user_connection(db, user, connection_id)
+    start, weeks_ahead = await _strength_window(db, conn, window)
+    return await build_team_schedule_rankings(
+        db, conn.season, start, weeks_ahead=weeks_ahead, scoring=conn.scoring_type
     )
 
 
