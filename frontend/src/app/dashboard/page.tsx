@@ -105,6 +105,7 @@ export default function DashboardPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<{ message: string; reconnect: boolean } | null>(null);
   const [refreshingStats, setRefreshingStats] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   const { data: roster, isLoading: rosterLoading } = useQuery({
     queryKey: ["roster", league?.id],
@@ -226,6 +227,31 @@ export default function DashboardPage() {
     }
   }
 
+  /** Remove this league from the app: its rosters, matchups and any stored
+   * ESPN sign-in go with it. Nothing changes on Sleeper or ESPN. */
+  async function disconnectLeague() {
+    if (!league) return;
+    const name = league.league_name ?? "this league";
+    const confirmed = window.confirm(
+      `Disconnect ${name}? Its rosters, matchups and stored sign-in are deleted from FFAI. Your league on ${league.platform === "espn" ? "ESPN" : "Sleeper"} isn't touched, and you can connect it again later.`,
+    );
+    if (!confirmed) return;
+    setDisconnecting(true);
+    setSyncError(null);
+    try {
+      await api(`/api/leagues/${league.id}`, { method: "DELETE" });
+      // Reload so the league list re-reads: the next league is selected, or
+      // with none left the app goes back to Connect.
+      window.location.reload();
+    } catch (err) {
+      setSyncError({
+        message: err instanceof Error ? err.message : "Couldn't disconnect this league.",
+        reconnect: false,
+      });
+      setDisconnecting(false);
+    }
+  }
+
   async function refreshStats() {
     setRefreshingStats(true);
     setSyncError(null);
@@ -303,6 +329,16 @@ export default function DashboardPage() {
                 Synced {timeAgo(league.last_synced_at)}
                 {syncIsStale(league.last_synced_at) && " — trades and pickups may be missing"}
               </p>
+            )}
+            {league && (
+              <button
+                type="button"
+                onClick={disconnectLeague}
+                disabled={disconnecting}
+                className="self-start text-xs text-gray-400 underline-offset-2 hover:text-red-600 hover:underline disabled:opacity-60 dark:hover:text-red-400 sm:self-end"
+              >
+                {disconnecting ? "Disconnecting…" : "Disconnect league"}
+              </button>
             )}
             {syncError && (
               <p role="alert" className="max-w-xs text-xs text-red-600 dark:text-red-400 sm:text-right">

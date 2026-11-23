@@ -147,6 +147,9 @@ export default function Landing() {
       <footer className="landing-footer">
         <Brand href="/" />
         <p>Make better calls. Enjoy the game.</p>
+        <Link href="/privacy" className="text-sm font-medium hover:text-accent">
+          Privacy
+        </Link>
         <Link href="/login" className="text-sm font-medium hover:text-accent">
           Get started <span aria-hidden="true">↗</span>
         </Link>
