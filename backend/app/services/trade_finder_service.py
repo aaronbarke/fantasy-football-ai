@@ -1,9 +1,13 @@
 """Automated trade finder.
 
-Scans the rest of the league for 1-for-1 swaps that are (a) roughly fair by
-trade value and (b) a genuine win-win — each side's optimal starting lineup
-actually improves. No chat prompt required: this is deterministic and ranks the
-candidates itself.
+Scans the rest of the league for 1-for-1, 2-for-1, 1-for-2 and 2-for-2 deals
+that are (a) roughly fair by trade value and (b) a genuine win-win — each
+side's optimal starting lineup actually improves. No chat prompt required:
+this is deterministic and ranks the candidates itself.
+
+Two horizons: "week" scores lineups with each player's season points per
+game; "playoffs" scores them with his projected points per game over the
+fantasy playoffs (talent crossed with schedule, from playoff_outlook_service).
 
 How it decides:
 - **Fairness** uses the leaguewide trade-value currency (VOR-based, comparable
@@ -46,10 +50,14 @@ def _lineup_points(slots: list[str], players: list[dict]) -> float:
 
 
 def _roster_dicts(
-    ids: list[str], values: dict[str, dict], meta: dict[str, Player]
+    ids: list[str],
+    values: dict[str, dict],
+    meta: dict[str, Player],
+    projections: dict[str, float] | None = None,
 ) -> list[dict]:
-    """Optimizer-shaped player dicts for a roster: projected = weekly ppg.
-    A player out for weeks (IR / PUP / suspended) contributes nothing."""
+    """Optimizer-shaped player dicts for a roster: projected = weekly ppg, or
+    ``projections[id]`` when given (a player missing from it scores 0). A
+    player out for weeks (IR / PUP / suspended) contributes nothing."""
     out = []
     for pid in ids:
         p = meta.get(pid)
@@ -63,7 +71,13 @@ def _roster_dicts(
                 "name": p.full_name,
                 "position": p.position,
                 "team": p.team,
-                "projected": 0.0 if long_term else (v.get("ppg") or 0.0),
+                "projected": 0.0
+                if long_term
+                else (
+                    projections.get(pid, 0.0)
+                    if projections is not None
+                    else (v.get("ppg") or 0.0)
+                ),
                 "value": v.get("value"),
                 "trend": v.get("trend"),
                 "injury_status": p.injury_status,
@@ -103,13 +117,23 @@ def _side_value(players: list[dict]) -> float:
     return sum(p["value"] or 0.0 for p in players)
 
 
-def _package_rationale(give: list[dict], recv: list[dict], my_gain: float, owner: str) -> str:
+SHAPES = ("1-1", "2-1", "1-2", "2-2")
+# A deal has to be worth at least this much to your lineup to be listed.
+MIN_GAIN = 0.5
+# At most this many versions of a deal for the same player from the same team.
+MAX_PER_TARGET = 2
+
+
+def _package_rationale(
+    give: list[dict], recv: list[dict], my_gain: float, owner: str, playoffs: bool = False
+) -> str:
     gives = " + ".join(p["name"] for p in give)
     gets = " + ".join(p["name"] for p in recv)
     shape = "consolidate" if len(give) > len(recv) else "add depth" if len(recv) > len(give) else "swap"
+    when = " in the fantasy playoffs" if playoffs else ""
     return (
         f"Give {gives} for {gets} ({shape}) — about +{my_gain:.1f} pts/wk to your "
-        f"starting lineup, and it doesn't set back {owner}."
+        f"starting lineup{when}, and it doesn't set back {owner}."
     )
 
 
@@ -121,9 +145,12 @@ def rank_trades(
     target: str | None = None,
     shed: str | None = None,
     roster_size: int | None = None,
+    shape: str | None = None,
+    playoffs: bool = False,
 ) -> list[dict]:
     """Pure ranking of win-win, roughly-even packages between two rosters —
-    1-for-1, 2-for-1 (consolidate) and 1-for-2 (add depth). Best lineup gain for
+    1-for-1, 2-for-1 (consolidate), 1-for-2 (add depth) and 2-for-2 (``shape``
+    picks one, e.g. "2-1"; None tries them all). Best lineup gain for
     the user first. The value-fairness check runs BEFORE the (costlier) lineup
     re-optimization, so most combinations are rejected cheaply.
 
@@ -151,12 +178,14 @@ def rank_trades(
     their_singles = [[p] for p in their_pool]
     their_pairs = [list(c) for c in combinations(their_pool, 2)]
 
-    # (give options, receive options): 1-for-1, 2-for-1 (consolidate), 1-for-2 (depth)
-    shapes = [
-        (my_singles, their_singles),
-        (my_pairs, their_singles),
-        (my_singles, their_pairs),
-    ]
+    # (give options, receive options) by "give-receive" shape
+    by_shape = {
+        "1-1": (my_singles, their_singles),
+        "2-1": (my_pairs, their_singles),
+        "1-2": (my_singles, their_pairs),
+        "2-2": (my_pairs, their_pairs),
+    }
+    shapes = [by_shape[shape]] if shape else list(by_shape.values())
 
     out: list[dict] = []
     for give_opts, recv_opts in shapes:
@@ -191,7 +220,7 @@ def rank_trades(
                     their_after = [p for p in their_after if p["id"] not in their_cut]
                 my_gain = _lineup_points(slots, my_after) - my_base
                 their_gain = _lineup_points(slots, their_after) - their_base
-                if my_gain <= 0 or their_gain < 0:  # must be a genuine win-win
+                if my_gain < MIN_GAIN or their_gain < 0:  # must be a genuine win-win
                     continue
 
                 out.append(
@@ -207,7 +236,7 @@ def rank_trades(
                         "you_drop": [_player_view(p) for p in my_drops],
                         "they_drop": [_player_view(p) for p in their_drops],
                         "rationale": _package_rationale(
-                            give, recv, my_gain, partner["owner_name"]
+                            give, recv, my_gain, partner["owner_name"], playoffs
                         ),
                     }
                 )
@@ -236,16 +265,40 @@ def _player_view(p: dict) -> dict:
     }
 
 
+async def _playoff_projections(db: AsyncSession, conn: LeagueConnection) -> dict[str, float]:
+    """player_id → projected points per week over the fantasy playoffs."""
+    from app.services.playoff_outlook_service import build_player_outlook
+    from app.services.schedule_service import FANTASY_PLAYOFF_START, FANTASY_PLAYOFF_WEEKS
+
+    outlook = await build_player_outlook(
+        db,
+        conn.season,
+        FANTASY_PLAYOFF_START,
+        weeks_ahead=FANTASY_PLAYOFF_WEEKS,
+        scoring=conn.scoring_type,
+    )
+    weeks = len(outlook["weeks"]) or 1
+    return {
+        e["id"]: e["proj_total"] / weeks
+        for entries in outlook["positions"].values()
+        for e in entries
+    }
+
+
 async def find_trades(
     db: AsyncSession,
     conn: LeagueConnection,
     max_results: int = 8,
     target: str | None = None,
     shed: str | None = None,
+    shape: str | None = None,
+    horizon: str = "week",
 ) -> list[dict]:
     """Ranked win-win trade candidates across the whole league. Optional
-    ``target`` (position to acquire) and ``shed`` (position to trade away)
-    narrow the search."""
+    ``target`` (position to acquire), ``shed`` (position to trade away) and
+    ``shape`` ("1-1", "2-1", "1-2", "2-2") narrow the search. ``horizon``
+    "playoffs" scores lineups over the fantasy playoffs instead of this
+    season's points per game."""
     rosters = (
         await db.execute(select(Roster).where(Roster.connection_id == conn.id))
     ).scalars().all()
@@ -267,7 +320,9 @@ async def find_trades(
 
     slots = _lineup_slots(conn)
     roster_size = active_roster_size(conn.roster_positions)
-    my_players = _roster_dicts(list(mine.players), values, meta)
+    playoffs = horizon == "playoffs"
+    projections = await _playoff_projections(db, conn) if playoffs else None
+    my_players = _roster_dicts(list(mine.players), values, meta, projections)
 
     candidates: list[dict] = []
     for other in others:
@@ -277,12 +332,45 @@ async def find_trades(
             "record": f"{other.wins}-{other.losses}"
             + (f"-{other.ties}" if other.ties else ""),
         }
-        their_players = _roster_dicts(list(other.players), values, meta)
+        their_players = _roster_dicts(list(other.players), values, meta, projections)
         candidates.extend(
             rank_trades(
-                my_players, their_players, slots, partner, target, shed, roster_size
+                my_players,
+                their_players,
+                slots,
+                partner,
+                target,
+                shed,
+                roster_size,
+                shape=shape,
+                playoffs=playoffs,
             )
         )
 
     candidates.sort(key=_trade_score, reverse=True)
-    return candidates[:max_results]
+    return _distinct(candidates)[:max_results]
+
+
+def _distinct(ranked: list[dict]) -> list[dict]:
+    """Collapse near-duplicates, keeping the best-ranked of each. Two deals
+    with the same partner where you give the same players and get the same
+    headline player (your best incoming one) differ only by a throw-in, so
+    listing every throw-in variant just buries the other ideas; and any one
+    headline player from a team shows up at most MAX_PER_TARGET times."""
+    seen: set[tuple] = set()
+    per_headline: dict[tuple, int] = {}
+    out = []
+    for c in ranked:
+        headline = max(c["receive"], key=lambda p: p.get("ppg") or 0)["id"]
+        key = (
+            c["partner"]["team_id"],
+            frozenset(p["id"] for p in c["give"]),
+            headline,
+        )
+        target = (c["partner"]["team_id"], headline)
+        if key in seen or per_headline.get(target, 0) >= MAX_PER_TARGET:
+            continue
+        seen.add(key)
+        per_headline[target] = per_headline.get(target, 0) + 1
+        out.append(c)
+    return out

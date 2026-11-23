@@ -19,6 +19,9 @@ ESPN_ABBR_FIX = {"WSH": "WAS"}
 # A game is treated as finished this long after kickoff.
 GAME_FINISHED_AFTER = timedelta(hours=4)
 REGULAR_SEASON_MAX_WEEK = 18
+# Fantasy playoffs are the NFL's weeks 15-17 in most leagues.
+FANTASY_PLAYOFF_START = 15
+FANTASY_PLAYOFF_WEEKS = 3
 
 
 def utc_now() -> datetime:

@@ -382,7 +382,13 @@ def test_uneven_package_charges_the_forced_cut():
     ]
 
     def two_for_one(cands):
-        return [c for c in cands if len(c["give"]) == 2 and c["receive"][0]["id"] == "rb_stud"]
+        return [
+            c
+            for c in cands
+            if len(c["give"]) == 2
+            and len(c["receive"]) == 1
+            and c["receive"][0]["id"] == "rb_stud"
+        ]
 
     assert two_for_one(rank_trades(mine, theirs, SLOTS, PARTNER))
     full = rank_trades(mine, theirs, SLOTS, PARTNER, roster_size=len(theirs))

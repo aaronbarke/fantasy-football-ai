@@ -35,7 +35,11 @@ from app.schemas.league import (
     WaiverPlayer,
 )
 from app.services.espn_service import discover_espn_leagues, normalize_swid
-from app.services.schedule_service import current_nfl_week
+from app.services.schedule_service import (
+    FANTASY_PLAYOFF_START,
+    FANTASY_PLAYOFF_WEEKS,
+    current_nfl_week,
+)
 from app.services.sleeper_service import SleeperClient
 from app.services.sync_service import LeagueNotFoundError, sync_league, sync_live_scores
 from app.utils.credentials import open_credentials, seal_credentials
@@ -599,9 +603,6 @@ async def get_odds_history(
     return {"week": week, **build_odds_history(list(rows), kickoffs)}
 
 
-# Fantasy playoffs are the NFL's weeks 15-17 in most leagues.
-FANTASY_PLAYOFF_START = 15
-FANTASY_PLAYOFF_WEEKS = 3
 
 
 async def _strength_window(db: AsyncSession, conn, window: str) -> tuple[int, int]:

@@ -150,8 +150,11 @@ def test_finder_position_filters():
     # shed=WR → every candidate must give a WR away.
     for c in rank_trades(_MY, _THEIR, SLOTS, _PARTNER, shed="WR"):
         assert any(p["position"] == "WR" for p in c["give"])
-    # target a position nobody offers → nothing.
-    assert rank_trades(_MY, _THEIR, SLOTS, _PARTNER, target="QB") == []
+    # Target a position only a QB-for-QB swap could bring back → nothing in
+    # the shapes that can't carry one (2-for-2 can bundle a QB swap with an
+    # RB, which is a legitimate package).
+    for shape in ("1-1", "2-1", "1-2"):
+        assert rank_trades(_MY, _THEIR, SLOTS, _PARTNER, target="QB", shape=shape) == []
 
 
 def test_finder_skips_lopsided_and_non_upgrades():
@@ -209,3 +212,96 @@ async def test_find_trades_scans_league_and_excludes_self(db: AsyncSession):
         assert t["give"] and t["receive"]               # non-empty package sides
         assert t["your_lineup_gain"] > 0                # only real upgrades
         assert t["their_lineup_gain"] >= 0              # win-win
+
+
+# --- shapes, playoffs horizon, de-duplication -------------------------------
+
+
+def test_shape_limits_deal_shape_and_2_for_2_is_searched():
+    for shape, sizes in (("1-1", (1, 1)), ("2-1", (2, 1)), ("2-2", (2, 2))):
+        for c in rank_trades(_MY, _THEIR, SLOTS, _PARTNER, shape=shape):
+            assert (len(c["give"]), len(c["receive"])) == sizes
+    every = rank_trades(_MY, _THEIR, SLOTS, _PARTNER)
+    assert any(len(c["give"]) == 2 and len(c["receive"]) == 2 for c in every)
+
+
+def test_tiny_gains_are_not_listed():
+    from app.services.trade_finder_service import MIN_GAIN
+
+    for c in rank_trades(_MY, _THEIR, SLOTS, _PARTNER):
+        assert c["your_lineup_gain"] >= MIN_GAIN
+
+
+def test_throw_in_variants_collapse_to_one():
+    from app.services.trade_finder_service import _distinct
+
+    def deal(give, recv, gain):
+        return {
+            "partner": {"team_id": "t2"},
+            "give": [{"id": g, "ppg": 1} for g in give],
+            "receive": [{"id": r, "ppg": p} for r, p in recv],
+            "your_lineup_gain": gain,
+        }
+
+    ranked = [
+        deal(["a", "b"], [("star", 20), ("filler1", 2)], 7.0),
+        deal(["a", "b"], [("star", 20), ("filler2", 2)], 7.0),  # same deal, other throw-in
+        deal(["a", "c"], [("star", 20)], 6.0),
+        deal(["a", "d"], [("star", 20)], 5.0),  # third version for the same star
+        deal(["a"], [("other", 15)], 4.0),
+    ]
+    out = _distinct(ranked)
+    assert [len(c["give"]) for c in out] == [2, 2, 1]
+    assert [c["receive"][0]["id"] for c in out] == ["star", "star", "other"]
+
+
+async def test_playoffs_horizon_scores_lineups_with_playoff_projections(db, monkeypatch):
+    from app.services import trade_finder_service
+
+    conn = LeagueConnection(
+        id=uuid.uuid4(), user_id=uuid.uuid4(), platform="sleeper", league_id="L",
+        league_name="L", season=SEASON, scoring_type="ppr", team_id="1",
+        roster_positions=["QB", "RB", "WR", "BN", "BN"],
+    )
+    db.add_all(
+        [
+            conn,
+            Player(id="my_rb", full_name="My RB", position="RB", team="A"),
+            Player(id="my_rb2", full_name="My RB2", position="RB", team="A"),
+            Player(id="my_wr", full_name="My WR", position="WR", team="A"),
+            Player(id="my_qb", full_name="My QB", position="QB", team="A"),
+            Player(id="th_wr", full_name="Their WR", position="WR", team="B"),
+            Player(id="th_wr2", full_name="Their WR2", position="WR", team="B"),
+            Player(id="th_rb", full_name="Their RB", position="RB", team="B"),
+            Player(id="th_qb", full_name="Their QB", position="QB", team="B"),
+            Roster(connection_id=conn.id, team_id="1", players=["my_qb", "my_rb", "my_rb2", "my_wr"]),
+            Roster(connection_id=conn.id, team_id="2", players=["th_qb", "th_rb", "th_wr", "th_wr2"]),
+        ]
+    )
+    await db.commit()
+
+    values = {pid: {"value": 20.0, "ppg": 10.0, "trend": None}
+              for pid in ("my_rb", "my_rb2", "my_wr", "my_qb", "th_wr", "th_wr2", "th_rb", "th_qb")}
+
+    async def fake_values(db, scoring):
+        return values
+
+    # Season ppg says everyone is equal (no trade helps); the playoff
+    # projections say I have a spare RB and need a WR while they need an RB,
+    # so my RB2 for one of their WRs helps both sides.
+    playoff = {"my_qb": 18, "my_rb": 16, "my_rb2": 14, "my_wr": 9,
+               "th_qb": 18, "th_rb": 8, "th_wr": 17, "th_wr2": 15}
+
+    async def fake_playoff(db, conn):
+        return playoff
+
+    monkeypatch.setattr(trade_finder_service, "compute_player_values", fake_values)
+    monkeypatch.setattr(trade_finder_service, "_playoff_projections", fake_playoff)
+
+    assert await find_trades(db, conn, horizon="week") == []
+    deals = await find_trades(db, conn, horizon="playoffs")
+    assert deals
+    top = deals[0]
+    assert [p["id"] for p in top["give"]] == ["my_rb2"]
+    assert [p["position"] for p in top["receive"]] == ["WR"]
+    assert "fantasy playoffs" in top["rationale"]
