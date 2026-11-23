@@ -138,6 +138,15 @@ async def sync_id_crosswalk(db: AsyncSession) -> int:
     return count
 
 
+def _opponent(value: Any) -> str | None:
+    """nflverse opponent code in our team codes ("LA" → "LAR"), so it joins
+    against the schedule and team rosters."""
+    from app.services.team_stats_service import normalize_team
+
+    code = _clean(value)
+    return normalize_team(code) if code else None
+
+
 async def sync_weekly_stats(db: AsyncSession, seasons: list[int]) -> int:
     """Upsert nflverse weekly stats into player_stats_weekly, mapping
     gsis_id → sleeper player_id via the crosswalk on the players table."""
@@ -187,7 +196,7 @@ async def sync_weekly_stats(db: AsyncSession, seasons: list[int]) -> int:
             "air_yards_share": _clean(getattr(row, "air_yards_share", None)),
             "fantasy_points_ppr": _clean(getattr(row, "fantasy_points_ppr", None)),
             "fantasy_points_std": _clean(getattr(row, "fantasy_points", None)),
-            "opponent": _clean(getattr(row, "opponent_team", None)),
+            "opponent": _opponent(getattr(row, "opponent_team", None)),
         }
         ppr = values["fantasy_points_ppr"]
         std = values["fantasy_points_std"]

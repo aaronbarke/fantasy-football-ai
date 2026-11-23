@@ -9,38 +9,24 @@ import PageHeader from "@/components/PageHeader";
 import { api } from "@/lib/api";
 import { useLeague } from "@/hooks/useLeague";
 import { positionColor } from "@/lib/utils";
-
-interface Cell {
-  week: number;
-  opponent: string | null;
-  home?: boolean;
-  rank: number | null;
-  pts_allowed_avg?: number | null;
-}
+import TeamScheduleRankings, {
+  cellColor,
+  matchupTitle,
+  type MatchupCell,
+} from "@/components/TeamScheduleRankings";
 
 interface StrengthPlayer {
   id: string;
   name: string;
   position: string | null;
   team: string | null;
-  cells: Cell[];
+  cells: MatchupCell[];
 }
 
 interface StrengthData {
   weeks: number[];
   stats_season: number;
   players: StrengthPlayer[];
-}
-
-function cellColor(rank: number | null): string {
-  // Green/gray pick up their dark-mode tints from the global remap layer; the
-  // warm tiers need explicit dark variants or they glow cream on the dark theme.
-  if (rank == null) return "bg-gray-100 text-gray-400";
-  if (rank <= 8) return "bg-green-100 text-green-800";
-  if (rank <= 16) return "bg-green-50 text-green-700";
-  if (rank <= 24)
-    return "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300";
-  return "bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300";
 }
 
 export default function SchedulePage() {
@@ -150,11 +136,7 @@ export default function SchedulePage() {
                                 )}`,
                               )
                             }
-                            title={
-                              c.pts_allowed_avg != null
-                                ? `${c.opponent} allows ${c.pts_allowed_avg} PPR/gm to ${p.position}s (rank ${c.rank}/32)`
-                                : undefined
-                            }
+                            title={matchupTitle(p.position, c)}
                             className={`w-full rounded px-1.5 py-1.5 text-xs font-medium hover:ring-2 hover:ring-accent ${cellColor(c.rank)}`}
                           >
                             {c.home ? "" : "@"}
@@ -172,6 +154,14 @@ export default function SchedulePage() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {league && (
+          <TeamScheduleRankings
+            leagueId={league.id}
+            window={window}
+            myPlayers={data?.players ?? []}
+          />
         )}
       </main>
     </>
